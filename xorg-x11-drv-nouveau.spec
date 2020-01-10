@@ -7,7 +7,7 @@ Summary:   Xorg X11 nouveau video driver for NVIDIA graphics chipsets
 Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
-Version:   1.0.10
+Version:   1.0.12
 Release:   1%{?dist}
 URL:       http://www.x.org
 License:   MIT
@@ -17,14 +17,13 @@ Group:     User Interface/X Hardware Support
 %if 0%{?gitdate}
 Source0: xf86-video-nouveau-%{gitdate}.tar.bz2
 %else
-Source0: http://nouveau.freedesktop.org/release/xf86-video-nouveau-%{version}.tar.bz2
+Source0: http://xorg.freedesktop.org/releases/individual/driver/xf86-video-nouveau-%{version}.tar.bz2
 %endif
 Source1: make-git-snapshot.sh
 
 ExcludeArch: s390 s390x
 Patch0:  xorg-x11-drv-nouveau-ppc.patch
 Patch1:  xorg-x11-drv-nouveau-libdrm2.patch
-Patch3:  xorg-x11-drv-nouveau-tmcoords.patch
 
 BuildRequires: libtool automake autoconf
 BuildRequires: xorg-x11-server-devel > 1.7.99.3-3
@@ -57,7 +56,6 @@ X.Org X11 nouveau video driver.
 #patch0 -p1
 %endif
 %patch1 -p1
-#patch3 -p1
 
 %build
 autoreconf -v --install --force
@@ -81,6 +79,12 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Thu Dec 10 2015 Ben Skeggs <bskeggs@redhat.com> 1.0.12-1
+- nouveau 1.0.12
+
+* Wed Nov 11 2015 Adam Jackson <ajax@redhat.com> 1.0.11-1
+- nouveau 1.0.11
+
 * Wed Apr 23 2014 Adam Jackson <ajax@redhat.com> 1.0.10-1
 - nouveau 1.0.10
 

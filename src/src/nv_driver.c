@@ -21,6 +21,7 @@
  */
 
 #include <stdio.h>
+#include <fcntl.h>
 
 #include "nv_include.h"
 
@@ -30,6 +31,15 @@
 #include "nouveau_drm.h"
 #ifdef DRI2
 #include "dri2.h"
+#endif
+
+#include "nouveau_copy.h"
+#include "nouveau_present.h"
+#include "nouveau_sync.h"
+
+#if !HAVE_XORG_LIST
+#define xorg_list_is_empty              list_is_empty
+#define xorg_list_for_each_entry        list_for_each_entry
 #endif
 
 /*
@@ -227,15 +237,21 @@ NVDriverFunc(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data)
 	    flag = (CARD32 *)data;
 	    (*flag) = 0;
 	    return TRUE;
+#if XORG_VERSION_CURRENT > XORG_VERSION_NUMERIC(1,15,99,0,0)
+	case SUPPORTS_SERVER_FDS:
+	    return TRUE;
+#endif
 	default:
 	    return FALSE;
     }
 }
 
 static void
-NVInitScrn(ScrnInfoPtr pScrn, int entity_num)
+NVInitScrn(ScrnInfoPtr pScrn, struct xf86_platform_device *platform_dev,
+	   int entity_num)
 {
 	DevUnion *pPriv;
+	NVEntPtr pNVEnt;
 
 	pScrn->driverVersion    = NV_VERSION;
 	pScrn->driverName       = NV_DRIVER_NAME;
@@ -258,41 +274,89 @@ NVInitScrn(ScrnInfoPtr pScrn, int entity_num)
 				     NVEntityIndex);
 	if (!pPriv->ptr) {
 		pPriv->ptr = xnfcalloc(sizeof(NVEntRec), 1);
+		pNVEnt = pPriv->ptr;
+		pNVEnt->platform_dev = platform_dev;
+	}
+	else
+		pNVEnt = pPriv->ptr;
+
+	/* Reset settings which must not persist across server regeneration */
+	if (pNVEnt->reinitGeneration != serverGeneration) {
+		pNVEnt->reinitGeneration = serverGeneration;
+		/* Clear mask of assigned crtc's in this generation to "none" */
+		pNVEnt->assigned_crtcs = 0;
 	}
 
 	xf86SetEntityInstanceForScreen(pScrn, entity_num,
 					xf86GetNumEntityInstances(entity_num) - 1);
 }
 
+static struct nouveau_device *
+NVOpenNouveauDevice(struct pci_device *pci_dev,
+	struct xf86_platform_device *platform_dev, int scrnIndex, Bool probe)
+{
+	struct nouveau_device *dev = NULL;
+	char *busid;
+	int ret, fd = -1;
+
+#ifdef ODEV_ATTRIB_PATH
+	if (platform_dev)
+		busid = NULL;
+	else
+#endif
+	{
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,9,99,901,0)
+		XNFasprintf(&busid, "pci:%04x:%02x:%02x.%d",
+			    pci_dev->domain, pci_dev->bus,
+			    pci_dev->dev, pci_dev->func);
+#else
+		busid = XNFprintf("pci:%04x:%02x:%02x.%d",
+				  pci_dev->domain, pci_dev->bus,
+				  pci_dev->dev, pci_dev->func);
+#endif
+	}
+
+#if defined(ODEV_ATTRIB_FD)
+	if (platform_dev)
+		fd = xf86_get_platform_device_int_attrib(platform_dev,
+							 ODEV_ATTRIB_FD, -1);
+#endif
+	if (fd != -1)
+		ret = nouveau_device_wrap(fd, 0, &dev);
+#ifdef ODEV_ATTRIB_PATH
+	else if (platform_dev) {
+		const char *path;
+
+		path = xf86_get_platform_device_attrib(platform_dev,
+						       ODEV_ATTRIB_PATH);
+
+		fd = open(path, O_RDWR | O_CLOEXEC);
+		ret = nouveau_device_wrap(fd, 1, &dev);
+		if (ret)
+			close(fd);
+	}
+#endif
+	else
+		ret = nouveau_device_open(busid, &dev);
+	if (ret)
+		xf86DrvMsg(scrnIndex, X_ERROR,
+			   "[drm] Failed to open DRM device for %s: %d\n",
+			   busid, ret);
+
+	free(busid);
+	return dev;
+}
+
 static Bool
-NVHasKMS(struct pci_device *pci_dev)
+NVHasKMS(struct pci_device *pci_dev, struct xf86_platform_device *platform_dev)
 {
 	struct nouveau_device *dev = NULL;
 	drmVersion *version;
-	char *busid;
-	int chipset, ret;
+	int chipset;
 
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,9,99,901,0)
-	XNFasprintf(&busid, "pci:%04x:%02x:%02x.%d",
-		    pci_dev->domain, pci_dev->bus, pci_dev->dev, pci_dev->func);
-#else
-	busid = XNFprintf("pci:%04x:%02x:%02x.%d",
-			  pci_dev->domain, pci_dev->bus, pci_dev->dev, pci_dev->func);
-#endif
-
-	ret = drmCheckModesettingSupported(busid);
-	if (ret) {
-		xf86DrvMsg(-1, X_ERROR, "[drm] KMS not enabled\n");
-		free(busid);
+	dev = NVOpenNouveauDevice(pci_dev, platform_dev, -1, TRUE);
+	if (!dev)
 		return FALSE;
-	}
-
-	ret = nouveau_device_open(busid, &dev);
-	free(busid);
-	if (ret) {
-		xf86DrvMsg(-1, X_ERROR, "[drm] failed to open device\n");
-		return FALSE;
-	}
 
 	/* Check the version reported by the kernel module.  In theory we
 	 * shouldn't have to do this, as libdrm_nouveau will do its own checks.
@@ -327,7 +391,7 @@ NVHasKMS(struct pci_device *pci_dev)
 	case 0x100:
 		break;
 	default:
-		xf86DrvMsg(-1, X_ERROR, "Unknown chipset: NV%02x\n", chipset);
+		xf86DrvMsg(-1, X_ERROR, "Unknown chipset: NV%02X\n", chipset);
 		return FALSE;
 	}
 	return TRUE;
@@ -344,7 +408,7 @@ NVPciProbe(DriverPtr drv, int entity_num, struct pci_device *pci_dev,
 	};
 	ScrnInfoPtr pScrn = NULL;
 
-	if (!NVHasKMS(pci_dev))
+	if (!NVHasKMS(pci_dev, NULL))
 		return FALSE;
 
 	pScrn = xf86ConfigPciEntity(pScrn, 0, entity_num, NVChipsets,
@@ -352,7 +416,7 @@ NVPciProbe(DriverPtr drv, int entity_num, struct pci_device *pci_dev,
 	if (!pScrn)
 		return FALSE;
 
-	NVInitScrn(pScrn, entity_num);
+	NVInitScrn(pScrn, NULL, entity_num);
 
 	return TRUE;
 }
@@ -365,10 +429,7 @@ NVPlatformProbe(DriverPtr driver,
 	ScrnInfoPtr scrn = NULL;
 	uint32_t scr_flags = 0;
 
-	if (!dev->pdev)
-		return FALSE;
-
-	if (!NVHasKMS(dev->pdev))
+	if (!NVHasKMS(dev->pdev, dev))
 		return FALSE;
 
 	if (flags & PLATFORM_PROBE_GPU_SCREEN)
@@ -382,7 +443,7 @@ NVPlatformProbe(DriverPtr driver,
 		xf86SetEntityShared(entity_num);
 	xf86AddEntityToScreen(scrn, entity_num);
 
-	NVInitScrn(scrn, entity_num);
+	NVInitScrn(scrn, dev, entity_num);
 
 	return TRUE;
 }
@@ -421,13 +482,22 @@ NVEnterVT(VT_FUNC_ARGS_DECL)
 {
 	SCRN_INFO_PTR(arg);
 	NVPtr pNv = NVPTR(pScrn);
+#ifdef XF86_PDEV_SERVER_FD
+	NVEntPtr pNVEnt = NVEntPriv(pScrn);
+#endif
 	int ret;
 
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO, "NVEnterVT is called.\n");
 
-	ret = drmSetMaster(pNv->dev->fd);
-	if (ret)
-		ErrorF("Unable to get master: %s\n", strerror(errno));
+#ifdef XF86_PDEV_SERVER_FD
+	if (!(pNVEnt->platform_dev &&
+	      (pNVEnt->platform_dev->flags & XF86_PDEV_SERVER_FD)))
+#endif
+	{
+		ret = drmSetMaster(pNv->dev->fd);
+		if (ret)
+			ErrorF("Unable to get master: %s\n", strerror(errno));
+	}
 
 	if (XF86_CRTC_CONFIG_PTR(pScrn)->num_crtc && !xf86SetDesiredModes(pScrn))
 		return FALSE;
@@ -449,9 +519,18 @@ NVLeaveVT(VT_FUNC_ARGS_DECL)
 {
 	SCRN_INFO_PTR(arg);
 	NVPtr pNv = NVPTR(pScrn);
+#ifdef XF86_PDEV_SERVER_FD
+	NVEntPtr pNVEnt = NVEntPriv(pScrn);
+#endif
 	int ret;
 
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO, "NVLeaveVT is called.\n");
+
+#ifdef XF86_PDEV_SERVER_FD
+	if (pNVEnt->platform_dev &&
+	    (pNVEnt->platform_dev->flags & XF86_PDEV_SERVER_FD))
+		return;
+#endif
 
 	ret = drmDropMaster(pNv->dev->fd);
 	if (ret && errno != EIO && errno != ENODEV)
@@ -463,9 +542,8 @@ NVFlushCallback(CallbackListPtr *list, pointer user_data, pointer call_data)
 {
 	ScrnInfoPtr pScrn = user_data;
 	NVPtr pNv = NVPTR(pScrn);
-
-	if (pScrn->vtSema && !pNv->NoAccel)
-		nouveau_pushbuf_kick(pNv->pushbuf, pNv->pushbuf->channel);
+	if (pScrn->vtSema && pNv->Flush)
+		pNv->Flush(pScrn);
 }
 
 #ifdef NOUVEAU_PIXMAP_SHARING
@@ -477,7 +555,11 @@ redisplay_dirty(ScreenPtr screen, PixmapDirtyUpdatePtr dirty)
 	PixmapRegionInit(&pixregion, dirty->slave_dst);
 
 	DamageRegionAppend(&dirty->slave_dst->drawable, &pixregion);
+#ifdef HAS_DIRTYTRACKING_ROTATION
+	PixmapSyncDirtyHelper(dirty);
+#else
 	PixmapSyncDirtyHelper(dirty, &pixregion);
+#endif
 
 	DamageRegionProcessPending(&dirty->slave_dst->drawable);
 	RegionUninit(&pixregion);
@@ -517,8 +599,7 @@ NVBlockHandler (BLOCKHANDLER_ARGS_DECL)
 	nouveau_dirty_update(pScreen);
 #endif
 
-	if (pScrn->vtSema && !pNv->NoAccel)
-		nouveau_pushbuf_kick(pNv->pushbuf, pNv->pushbuf->channel);
+	NVFlushCallback(NULL, pScrn, NULL);
 
 	if (pNv->VideoTimerCallback) 
 		(*pNv->VideoTimerCallback)(pScrn, currentTime.milliseconds);
@@ -529,7 +610,6 @@ NVCreateScreenResources(ScreenPtr pScreen)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	NVPtr pNv = NVPTR(pScrn);
-	PixmapPtr ppix;
 
 	pScreen->CreateScreenResources = pNv->CreateScreenResources;
 	if (!(*pScreen->CreateScreenResources)(pScreen))
@@ -540,8 +620,8 @@ NVCreateScreenResources(ScreenPtr pScreen)
 	if (!NVEnterVT(VT_FUNC_ARGS(0)))
 		return FALSE;
 
-	if (!pNv->NoAccel) {
-		ppix = pScreen->GetScreenPixmap(pScreen);
+	if (pNv->AccelMethod == EXA) {
+		PixmapPtr ppix = pScreen->GetScreenPixmap(pScreen);
 		nouveau_bo_ref(pNv->scanout, &nouveau_pixmap(ppix)->bo);
 	}
 
@@ -565,17 +645,18 @@ NVCloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	if (XF86_CRTC_CONFIG_PTR(pScrn)->num_crtc)
 		drmmode_screen_fini(pScreen);
 
-	if (!pNv->NoAccel)
-		nouveau_dri2_fini(pScreen);
+	nouveau_present_fini(pScreen);
+	nouveau_dri2_fini(pScreen);
+	nouveau_sync_fini(pScreen);
+	nouveau_copy_fini(pScreen);
 
 	if (pScrn->vtSema) {
 		NVLeaveVT(VT_FUNC_ARGS(0));
 		pScrn->vtSema = FALSE;
 	}
 
-	NVAccelFree(pScrn);
 	NVTakedownVideo(pScrn);
-	NVTakedownDma(pScrn);
+	NVAccelCommonFini(pScrn);
 	NVUnmapMem(pScrn);
 
 	xf86_cursors_fini(pScreen);
@@ -650,6 +731,7 @@ NVCloseDRM(ScrnInfoPtr pScrn)
 	drmFree(pNv->drm_device_name);
 	nouveau_client_del(&pNv->client);
 	nouveau_device_del(&pNv->dev);
+	free(pNv->render_node);
 }
 
 static void
@@ -688,8 +770,6 @@ static Bool NVOpenDRMMaster(ScrnInfoPtr pScrn)
 {
 	NVPtr pNv = NVPTR(pScrn);
 	NVEntPtr pNVEnt = NVEntPriv(pScrn);
-	struct pci_device *dev = pNv->PciInfo;
-	char *busid;
 	drmSetVersion sv;
 	int err;
 	int ret;
@@ -706,23 +786,10 @@ static Bool NVOpenDRMMaster(ScrnInfoPtr pScrn)
 		return TRUE;
 	}
 
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,9,99,901,0)
-	XNFasprintf(&busid, "pci:%04x:%02x:%02x.%d",
-		    dev->domain, dev->bus, dev->dev, dev->func);
-#else
-	busid = XNFprintf("pci:%04x:%02x:%02x.%d",
-			  dev->domain, dev->bus, dev->dev, dev->func);
-#endif
-
-	ret = nouveau_device_open(busid, &pNv->dev);
-	if (ret) {
-		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
-			   "[drm] Failed to open DRM device for %s: %d\n",
-			   busid, ret);
-		free(busid);
+	pNv->dev = NVOpenNouveauDevice(pNv->PciInfo, pNVEnt->platform_dev,
+				       pScrn->scrnIndex, FALSE);
+	if (!pNv->dev)
 		return FALSE;
-	}
-	free(busid);
 
 	sv.drm_di_major = 1;
 	sv.drm_di_minor = 1;
@@ -772,7 +839,7 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	struct nouveau_device *dev;
 	NVPtr pNv;
 	MessageType from;
-	const char *reason;
+	const char *reason, *string;
 	uint64_t v;
 	int ret;
 	int defaultDepth = 0;
@@ -837,7 +904,7 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	dev = pNv->dev;
 
 	pScrn->chipset = malloc(sizeof(char) * 25);
-	sprintf(pScrn->chipset, "NVIDIA NV%02X", dev->chipset);
+	sprintf((char *)pScrn->chipset, "NVIDIA NV%02X", dev->chipset);
 	xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Chipset: \"%s\"\n", pScrn->chipset);
 
 	switch (dev->chipset & ~0xf) {
@@ -861,16 +928,19 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	case 0x80:
 	case 0x90:
 	case 0xa0:
-		pNv->Architecture = NV_ARCH_50;
+		pNv->Architecture = NV_TESLA;
 		break;
 	case 0xc0:
 	case 0xd0:
-		pNv->Architecture = NV_ARCH_C0;
+		pNv->Architecture = NV_FERMI;
 		break;
 	case 0xe0:
 	case 0xf0:
 	case 0x100:
-		pNv->Architecture = NV_ARCH_E0;
+		pNv->Architecture = NV_KEPLER;
+		break;
+	case 0x110:
+		pNv->Architecture = NV_MAXWELL;
 		break;
 	default:
 		return FALSE;
@@ -896,7 +966,7 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 			break;
 		case 30:
 			/* OK on NV50 KMS */
-			if (pNv->Architecture < NV_ARCH_50)
+			if (pNv->Architecture < NV_TESLA)
 				NVPreInitFail("Depth 30 supported on G80+ only\n");
 			break;
 		case 15: /* 15 may get done one day, so leave any code for it in place */
@@ -970,20 +1040,34 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	xf86DrvMsg(pScrn->scrnIndex, from, "Using %s cursor\n",
 		pNv->HWCursor ? "HW" : "SW");
 
+	string = xf86GetOptValString(pNv->Options, OPTION_ACCELMETHOD);
+	if (string) {
+		if      (!strcmp(string,   "none")) pNv->AccelMethod = NONE;
+		else if (!strcmp(string,    "exa")) pNv->AccelMethod = EXA;
+		else {
+			xf86DrvMsg(pScrn->scrnIndex, X_CONFIG,
+				   "Invalid AccelMethod specified\n");
+		}
+	}
+
+	if (pNv->AccelMethod == UNKNOWN) {
+		pNv->AccelMethod = EXA;
+	}
+
 	if (xf86ReturnOptValBool(pNv->Options, OPTION_NOACCEL, FALSE)) {
-		pNv->NoAccel = TRUE;
+		pNv->AccelMethod = NONE;
 		xf86DrvMsg(pScrn->scrnIndex, X_CONFIG, "Acceleration disabled\n");
 	}
 
 	if (xf86ReturnOptValBool(pNv->Options, OPTION_SHADOW_FB, FALSE)) {
 		pNv->ShadowFB = TRUE;
-		pNv->NoAccel = TRUE;
+		pNv->AccelMethod = NONE;
 		xf86DrvMsg(pScrn->scrnIndex, X_CONFIG, 
 			"Using \"Shadow Framebuffer\" - acceleration disabled\n");
 	}
 
-	if (!pNv->NoAccel) {
-		if (pNv->Architecture >= NV_ARCH_50)
+	if (pNv->AccelMethod > NONE) {
+		if (pNv->Architecture >= NV_TESLA)
 			pNv->wfb_enabled = xf86ReturnOptValBool(
 				pNv->Options, OPTION_WFB, FALSE);
 
@@ -993,8 +1077,27 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	pNv->ce_enabled =
 		xf86ReturnOptValBool(pNv->Options, OPTION_ASYNC_COPY, FALSE);
 
-	if (!pNv->NoAccel && pNv->dev->chipset >= 0x11) {
+	/* Define maximum allowed level of DRI implementation to use.
+	 * We default to DRI2 on EXA for now, as DRI3 still has some
+	 * problems.
+	 */
+	pNv->max_dri_level = 2;
+	from = X_DEFAULT;
+
+	if (xf86GetOptValInteger(pNv->Options, OPTION_DRI,
+				 &pNv->max_dri_level)) {
+		from = X_CONFIG;
+		if (pNv->max_dri_level < 2)
+			pNv->max_dri_level = 2;
+		if (pNv->max_dri_level > 3)
+			pNv->max_dri_level = 3;
+	}
+	xf86DrvMsg(pScrn->scrnIndex, from, "Allowed maximum DRI level %i.\n",
+		   pNv->max_dri_level);
+
+	if (pNv->AccelMethod > NONE && pNv->dev->chipset >= 0x11) {
 		from = X_DEFAULT;
+		pNv->glx_vblank = TRUE;
 		if (xf86GetOptValBool(pNv->Options, OPTION_GLX_VBLANK,
 				      &pNv->glx_vblank))
 			from = X_CONFIG;
@@ -1051,16 +1154,27 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 			reason = ": Caution: Use of this swap limit > 1 violates OML_sync_control spec on this X-Server!\n";
 		}
 	} else {
-		/* Driver default: Double buffering on old servers, triple-buffering
-		 * on Xorg 1.12+.
+		/* Always default to double-buffering, because it avoids artifacts like
+		 * unthrottled rendering of non-fullscreen clients under desktop composition.
 		 */
-		pNv->swap_limit = (DRI2INFOREC_VERSION < 6) ? 1 : 2;
+		pNv->swap_limit = 1;
 		reason = "";
 		from = X_DEFAULT;
 	}
 
 	xf86DrvMsg(pScrn->scrnIndex, from, "Swap limit set to %d [Max allowed %d]%s\n",
 		   pNv->swap_limit, pNv->max_swap_limit, reason);
+
+	/* Does kernel do the sync of pageflips to vblank? */
+	pNv->has_async_pageflip = FALSE;
+#ifdef DRM_CAP_ASYNC_PAGE_FLIP
+	ret = drmGetCap(pNv->dev->fd, DRM_CAP_ASYNC_PAGE_FLIP, &v);
+	if (ret == 0 && v == 1) {
+		pNv->has_async_pageflip = TRUE;
+	}
+	xf86DrvMsg(pScrn->scrnIndex, X_DEFAULT, "Page flipping synced to vblank by %s.\n",
+			   pNv->has_async_pageflip ? "kernel" : "ddx");
+#endif
 
 	ret = drmmode_pre_init(pScrn, pNv->dev->fd, pScrn->bitsPerPixel >> 3);
 	if (ret == FALSE)
@@ -1080,7 +1194,7 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	 * The driver will not work as gpu screen without acceleration enabled.
 	 * To support this usecase modesetting ddx can be used instead.
 	 */
-	if (pNv->NoAccel || pNv->ShadowFB) {
+	if (pNv->AccelMethod <= NONE || pNv->ShadowFB) {
 		/*
 		 * Optimus mode requires acceleration enabled.
 		 * So if no mode is found, or the screen is created
@@ -1122,13 +1236,6 @@ NVPreInit(ScrnInfoPtr pScrn, int flags)
 	if (xf86LoadSubModule(pScrn, "fb") == NULL)
 		NVPreInitFail("\n");
 
-	/* Load EXA if needed */
-	if (!pNv->NoAccel) {
-		if (!xf86LoadSubModule(pScrn, "exa")) {
-			NVPreInitFail("\n");
-		}
-	}
-
 	/* Load shadowfb */
 	if (!xf86LoadSubModule(pScrn, "shadowfb"))
 		NVPreInitFail("\n");
@@ -1154,10 +1261,6 @@ NVMapMem(ScrnInfoPtr pScrn)
 	}
 
 	pScrn->displayWidth = pitch / (pScrn->bitsPerPixel / 8);
-
-	if (pNv->NoAccel)
-		return TRUE;
-
 	return TRUE;
 }
 
@@ -1248,12 +1351,12 @@ NVScreenInit(SCREEN_INIT_ARGS_DECL)
 	unsigned char *FBStart;
 	int displayWidth;
 
-	if (!pNv->NoAccel) {
-		if (!NVInitDma(pScrn) || !NVAccelCommonInit(pScrn)) {
+	if (pNv->AccelMethod == EXA) {
+		if (!NVAccelCommonInit(pScrn)) {
 			xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
 				   "Error initialising acceleration.  "
 				   "Falling back to NoAccel\n");
-			pNv->NoAccel = TRUE;
+			pNv->AccelMethod = NONE;
 			pNv->ShadowFB = TRUE;
 			pNv->wfb_enabled = FALSE;
 			pNv->tiled_scanout = FALSE;
@@ -1263,8 +1366,7 @@ NVScreenInit(SCREEN_INIT_ARGS_DECL)
 		}
 	}
 
-	if (!pNv->NoAccel)
-		nouveau_dri2_init(pScreen);
+	nouveau_copy_init(pScreen);
 
 	/* Allocate and map memory areas we need */
 	if (!NVMapMem(pScrn))
@@ -1316,7 +1418,7 @@ NVScreenInit(SCREEN_INIT_ARGS_DECL)
 		displayWidth = pNv->ShadowPitch / (pScrn->bitsPerPixel >> 3);
 		FBStart = pNv->ShadowPtr;
 	} else
-	if (pNv->NoAccel) {
+	if (pNv->AccelMethod <= NONE) {
 		pNv->ShadowPtr = NULL;
 		displayWidth = pScrn->displayWidth;
 		nouveau_bo_map(pNv->scanout, NOUVEAU_BO_RDWR, pNv->client);
@@ -1372,8 +1474,23 @@ NVScreenInit(SCREEN_INIT_ARGS_DECL)
 
 	xf86SetBlackWhitePixels(pScreen);
 
-	if (!pNv->NoAccel && !nouveau_exa_init(pScreen))
-		return FALSE;
+	if (nouveau_present_init(pScreen))
+		xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+			   "Hardware support for Present enabled\n");
+	else
+		xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+			   "Hardware support for Present disabled\n");
+
+	nouveau_sync_init(pScreen);
+	nouveau_dri2_init(pScreen);
+	if (pNv->AccelMethod == EXA) {
+		if (pNv->max_dri_level >= 3 &&
+		    !nouveau_dri3_screen_init(pScreen))
+			return FALSE;
+
+		if (!nouveau_exa_init(pScreen))
+			return FALSE;
+	}
 
 	xf86SetBackingStore(pScreen);
 	xf86SetSilkenMouse(pScreen);

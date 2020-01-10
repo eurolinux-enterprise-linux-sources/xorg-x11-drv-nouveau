@@ -286,9 +286,9 @@ NV50EXACopy(PixmapPtr pdpix, int srcX , int srcY,
 	if (!PUSH_SPACE(push, 32))
 		return;
 
-	BEGIN_NV04(push, SUBC_2D(0x0110), 1);
+	BEGIN_NV04(push, SUBC_2D(NV50_GRAPH_SERIALIZE), 1);
 	PUSH_DATA (push, 0);
-	BEGIN_NV04(push, SUBC_2D(0x088c), 1);
+	BEGIN_NV04(push, NV50_2D(BLIT_CONTROL), 1);
 	PUSH_DATA (push, 0);
 	BEGIN_NV04(push, NV50_2D(BLIT_DST_X), 12);
 	PUSH_DATA (push, dstX);
@@ -837,7 +837,7 @@ NV50EXAPrepareComposite(int op,
 	PUSH_RESET(push);
 	PUSH_REFN (push, pNv->scratch, NOUVEAU_BO_VRAM | NOUVEAU_BO_RDWR);
 
-	BEGIN_NV04(push, SUBC_2D(0x0110), 1);
+	BEGIN_NV04(push, SUBC_2D(NV50_GRAPH_SERIALIZE), 1);
 	PUSH_DATA (push, 0);
 
 	if (!NV50EXARenderTarget(pdpix, pdpict))
@@ -875,7 +875,7 @@ NV50EXAPrepareComposite(int op,
 			PUSH_DATA (push, PFP_S);
 	}
 
-	BEGIN_NV04(push, SUBC_3D(0x1334), 1);
+	BEGIN_NV04(push, NV50_3D(TIC_FLUSH), 1);
 	PUSH_DATA (push, 0);
 
 	BEGIN_NV04(push, NV50_3D(BIND_TIC(2)), 1);
@@ -1008,65 +1008,6 @@ NV50EXARectM2MF(NVPtr pNv, int w, int h, int cpp,
 		dst_y += line_count;
 		h  -= line_count;
 	}
-
-	return TRUE;
-}
-
-Bool
-NVA3EXARectCopy(NVPtr pNv, int w, int h, int cpp,
-		struct nouveau_bo *src, uint32_t src_off, int src_dom,
-		int src_pitch, int src_h, int src_x, int src_y,
-		struct nouveau_bo *dst, uint32_t dst_off, int dst_dom,
-		int dst_pitch, int dst_h, int dst_x, int dst_y)
-{
-	struct nouveau_pushbuf *push = pNv->ce_pushbuf;
-	struct nouveau_pushbuf_refn refs[] = {
-		{ src, src_dom | NOUVEAU_BO_RD },
-		{ dst, dst_dom | NOUVEAU_BO_WR },
-	};
-	unsigned exec;
-
-	if (nouveau_pushbuf_space(push, 64, 0, 0) ||
-	    nouveau_pushbuf_refn (push, refs, 2))
-		return FALSE;
-
-	exec = 0x00000000;
-	if (!src->config.nv50.memtype) {
-		src_off += src_y * src_pitch + src_x * cpp;
-		exec |= 0x00000010;
-	}
-	if (!dst->config.nv50.memtype) {
-		dst_off += dst_y * dst_pitch + dst_x * cpp;
-		exec |= 0x00000100;
-	}
-
-	BEGIN_NV04(push, SUBC_COPY(0x0200), 7);
-	PUSH_DATA (push, src->config.nv50.tile_mode);
-	PUSH_DATA (push, src_pitch);
-	PUSH_DATA (push, src_h);
-	PUSH_DATA (push, 1);
-	PUSH_DATA (push, 0);
-	PUSH_DATA (push, src_x * cpp);
-	PUSH_DATA (push, src_y);
-	BEGIN_NV04(push, SUBC_COPY(0x0220), 7);
-	PUSH_DATA (push, dst->config.nv50.tile_mode);
-	PUSH_DATA (push, dst_pitch);
-	PUSH_DATA (push, dst_h);
-	PUSH_DATA (push, 1);
-	PUSH_DATA (push, 0);
-	PUSH_DATA (push, dst_x * cpp);
-	PUSH_DATA (push, dst_y);
-	BEGIN_NV04(push, SUBC_COPY(0x030c), 8);
-	PUSH_DATA (push, (src->offset + src_off) >> 32);
-	PUSH_DATA (push, (src->offset + src_off));
-	PUSH_DATA (push, (dst->offset + dst_off) >> 32);
-	PUSH_DATA (push, (dst->offset + dst_off));
-	PUSH_DATA (push, src_pitch);
-	PUSH_DATA (push, dst_pitch);
-	PUSH_DATA (push, w * cpp);
-	PUSH_DATA (push, h);
-	BEGIN_NV04(push, SUBC_COPY(0x0300), 1);
-	PUSH_DATA (push, exec);
 
 	return TRUE;
 }

@@ -22,7 +22,7 @@
 
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-nouveau],
-        [1.0.10],
+        [1.0.12],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-nouveau])
 
@@ -80,7 +80,7 @@ XORG_DRIVER_CHECK_EXT(DPMSExtension, xextproto)
 XORG_DRIVER_CHECK_EXT(DRI2, [dri2proto >= 2.6])
 
 # Checks for pkg-config packages
-PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.17])
+PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.60])
 PKG_CHECK_MODULES(LIBDRM_NOUVEAU, [libdrm_nouveau >= 2.4.25])
 AC_SUBST(LIBDRM_NOUVEAU_CFLAGS)
 AC_SUBST(LIBDRM_NOUVEAU_LIBS)
@@ -126,6 +126,19 @@ AC_SUBST([DRIVER_NAME])
 
 XORG_MANPAGE_SECTIONS
 XORG_RELEASE_VERSION
+
+AC_CHECK_HEADERS([list.h],
+                 [have_list_h="yes"], [have_list_h="no"],
+                 [#include <X11/Xdefs.h>
+                  #include "xorg-server.h"])
+
+if test "x$have_list_h" = xyes; then
+    AC_CHECK_DECL(xorg_list_init,
+                  [AC_DEFINE(HAVE_XORG_LIST, 1, [Have xorg_list API])], [],
+                  [#include <X11/Xdefs.h>
+                   #include "xorg-server.h"
+                   #include "list.h"])
+fi
 
 AC_CONFIG_FILES([
 	Makefile

@@ -4,7 +4,7 @@ diff -up xf86-video-nouveau-1.0.10/configure.ac.jx xf86-video-nouveau-1.0.10/con
 @@ -81,7 +81,7 @@ XORG_DRIVER_CHECK_EXT(DRI2, [dri2proto >
  
  # Checks for pkg-config packages
- PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.17])
+ PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.60])
 -PKG_CHECK_MODULES(LIBDRM_NOUVEAU, [libdrm_nouveau >= 2.4.25])
 +PKG_CHECK_MODULES(LIBDRM_NOUVEAU, [libdrm_nouveau2 >= 2.4.25])
  AC_SUBST(LIBDRM_NOUVEAU_CFLAGS)

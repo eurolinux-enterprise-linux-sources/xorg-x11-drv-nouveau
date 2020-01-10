@@ -206,7 +206,7 @@ nv50_xv_image_put(ScrnInfoPtr pScrn,
 	BEGIN_NV04(push, NV50_3D(FP_START_ID), 1);
 	PUSH_DATA (push, PFP_NV12);
 
-	BEGIN_NV04(push, SUBC_3D(0x1334), 1);
+	BEGIN_NV04(push, NV50_3D(TIC_FLUSH), 1);
 	PUSH_DATA (push, 0);
 
 	BEGIN_NV04(push, NV50_3D(BIND_TIC(2)), 1);
@@ -326,7 +326,7 @@ nv50_xv_csc_update(ScrnInfoPtr pScrn, NVPortPrivPtr pPriv)
 	off[1] = Loff * yco + Coff * (uco[1] + vco[1]) + bright;
 	off[2] = Loff * yco + Coff * (uco[2] + vco[2]) + bright;
 
-	if (pNv->Architecture >= NV_ARCH_C0) {
+	if (pNv->Architecture >= NV_FERMI) {
 		nvc0_xv_csc_update(pNv, yco, off, uco, vco);
 		return;
 	}
@@ -364,6 +364,7 @@ nv50_xv_set_port_defaults(ScrnInfoPtr pScrn, NVPortPrivPtr pPriv)
 	pPriv->saturation	= 0;
 	pPriv->hue		= 0;
 	pPriv->iturbt_709	= 0;
+	pPriv->max_image_dim    = 8192;
 }
 
 int

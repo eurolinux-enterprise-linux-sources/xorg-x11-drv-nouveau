@@ -134,8 +134,10 @@ nouveau_wfb_setup_wrap(ReadMemoryProcPtr *pRead, WriteMemoryProcPtr *pWrite,
 		return;
 
 	ppix = NVGetDrawablePixmap(pDraw);
-	if (ppix)
-		bo = nouveau_pixmap_bo(ppix);
+	if (ppix) {
+		struct nouveau_pixmap *priv = nouveau_pixmap(ppix);
+		bo = priv ? priv->bo : NULL;
+	}
 
 	if (!ppix || !bo) {
 		for (i = 0; i < 6; i++)
