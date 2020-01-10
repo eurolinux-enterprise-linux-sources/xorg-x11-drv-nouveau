@@ -22,7 +22,7 @@
 
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-nouveau],
-        [0.0.16],
+        [1.0.1],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-nouveau])
 
@@ -67,7 +67,7 @@ XORG_DRIVER_CHECK_EXT(XV, videoproto)
 XORG_DRIVER_CHECK_EXT(DPMSExtension, xextproto)
 
 # Checks for pkg-config packages
-PKG_CHECK_MODULES(LIBDRM_NOUVEAU, libdrm_nouveau)
+PKG_CHECK_MODULES(LIBDRM_NOUVEAU, [libdrm_nouveau >= 2.4.25])
 AC_SUBST(LIBDRM_NOUVEAU_CFLAGS)
 AC_SUBST(LIBDRM_NOUVEAU_LIBS)
 

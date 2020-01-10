@@ -1,61 +1,66 @@
 %define tarball xf86-video-nouveau
 %define moduledir %(pkg-config xorg-server --variable=moduledir )
 %define driverdir %{moduledir}/drivers
-%define nouveau_version 0.0.16
-
-# Tarfile created using git
-# git clone git://git.freedesktop.org/git/nouveau/xf86-video-nouveau
-# git-archive --format=tar --prefix=xf86-video-nouveau-0.0.10/ %{git_version} | bzip2 > xf86-video-nouveau-0.0.10-%{gitdate}.tar.bz2
-
-%define gitdate 20110719
-%define git_version de9d1ba
-
-%define snapshot %{gitdate}git%{git_version}
-
-%define tarfile %{tarball}-%{nouveau_version}-%{snapshot}.tar.bz2
+#define gitdate 20120426
 
 Summary:   Xorg X11 nouveau video driver for NVIDIA graphics chipsets
 Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
-Version:   %{nouveau_version}
-Release:   13.%{snapshot}%{?dist}
+Version:   1.0.1
+Release:   3%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
-BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 # Fedora specific snapshot no upstream release
-Source0:   %{tarfile}
+%if 0%{?gitdate}
+Source0: xf86-video-nouveau-%{gitdate}.tar.bz2
+%else
+Source0: http://nouveau.freedesktop.org/release/xf86-video-nouveau-%{version}.tar.bz2
+%endif
+Source1: make-git-snapshot.sh
 
 ExcludeArch: s390 s390x
+Patch0:  xorg-x11-drv-nouveau-ppc.patch
+Patch1:  xorg-x11-drv-nouveau-libdrm2.patch
+Patch2:  xorg-x11-drv-nouveau-1.0.1-shadowfb.patch
 
 BuildRequires: libtool automake autoconf
-BuildRequires: xorg-x11-server-devel > 1.8
-BuildRequires: libdrm-devel >= 2.4.24
+BuildRequires: xorg-x11-server-devel > 1.7.99.3-3
+BuildRequires: libdrm-devel >= 2.4.24-0.1.20110106
 BuildRequires: mesa-libGL-devel
+%if 0%{?fedora} > 17 || 0%{?rhel} > 6
+BuildRequires: systemd-devel
+%else
 BuildRequires: libudev-devel
+%endif
 
-Requires:  hwdata
 Requires: Xorg %(xserver-sdk-abi-requires ansic)
 Requires: Xorg %(xserver-sdk-abi-requires videodrv)
-Requires:  libdrm >= 2.4.24
+Requires:  libdrm >= 2.4.33-0.1
 Requires:  kernel-drm-nouveau = 16
-Requires:  libudev
-
-#Patch1: nouveau-bgnr.patch
 
 %description 
 X.Org X11 nouveau video driver.
 
-%prep
-%setup -q -n %{tarball}-%{version}
+%if 0%{?gitdate}
+%define dirsuffix %{gitdate}
+%else
+%define dirsuffix %{version}
+%endif
 
-#%patch1 -p1 -b .bgnr
+%prep
+%setup -q -n xf86-video-nouveau-%{dirsuffix}
+%ifarch ppc %{power64}
+%patch0 -p1
+%endif
+%patch1 -p1
+%patch2 -p1
 
 %build
-autoreconf -v --install
-%configure --disable-static --with-kms=yes
+autoreconf -v --install --force
+%configure --disable-static
 
 make
 
@@ -75,6 +80,15 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Mon Oct 29 2012 bskeggs@redhat.com - 1:1.0.1-3
+- fix shadowfb segfault (rhbz#868118)
+
+* Wed Aug 22 2012 airlied@redhat.com - 1:1.0.1-2
+- rebuild for server ABI requires
+
+* Wed Aug 08 2012 Ben Skeggs <bskeggs@redhat.com> 1.0.1-1
+- nouveau 1.0.1 (rebase for 6.4)
+
 * Fri Jul 22 2011 Ben Skeggs <bskeggs@redhat.com> 0.0.16-13.20110719gitde9d1ba
 - minor fix from upstream, allowing 4 monitors across 2 cards to work
 
@@ -198,8 +212,8 @@ rm -rf $RPM_BUILD_ROOT
 
 * Fri Apr 17 2009 Ben Skeggs <bskeggs@redhat.com> 0.0.12-29.20090417gitfa2f111
 - avoid post-beta hangs experienced by many people (rh#495764, rh#493222).
-  - the bug here was relatively harmless, but exposed a more serious issue
-    which has been fixed in libdrm-2.4.6-6.fc11
+- the bug here was relatively harmless, but exposed a more serious issue
+  which has been fixed in libdrm-2.4.6-6.fc11
 - kms: speed up transitions, they could take a couple of seconds previously
 - framebuffer resize support (rh#495838, rh#487356, lots of dups)
 
