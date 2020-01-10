@@ -8,7 +8,7 @@ Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
 Version:   1.0.1
-Release:   3%{?dist}
+Release:   4%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -25,6 +25,7 @@ ExcludeArch: s390 s390x
 Patch0:  xorg-x11-drv-nouveau-ppc.patch
 Patch1:  xorg-x11-drv-nouveau-libdrm2.patch
 Patch2:  xorg-x11-drv-nouveau-1.0.1-shadowfb.patch
+Patch3:  xorg-x11-drv-nouveau-tmcoords.patch
 
 BuildRequires: libtool automake autoconf
 BuildRequires: xorg-x11-server-devel > 1.7.99.3-3
@@ -57,6 +58,7 @@ X.Org X11 nouveau video driver.
 %endif
 %patch1 -p1
 %patch2 -p1
+%patch3 -p1
 
 %build
 autoreconf -v --install --force
@@ -80,6 +82,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Thu Aug 01 2013 bskeggs@redhat.com - 1:1.0.1-4
+- fix transformed mask rendercheck test (rhbz#876566)
+
 * Mon Oct 29 2012 bskeggs@redhat.com - 1:1.0.1-3
 - fix shadowfb segfault (rhbz#868118)
 
