@@ -1,25 +1,12 @@
-From aacbc1c17b91b7d5f5f594cf20b830d8467b2916 Mon Sep 17 00:00:00 2001
-From: Ben Skeggs <bskeggs@redhat.com>
-Date: Wed, 8 Aug 2012 16:28:19 +1000
-Subject: [PATCH] nouveau-1.0.1-libdrm2
-
----
- configure.ac |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
-
-diff --git a/configure.ac b/configure.ac
-index af126fb..b1650ca 100644
---- a/configure.ac
-+++ b/configure.ac
-@@ -67,7 +67,7 @@ XORG_DRIVER_CHECK_EXT(XV, videoproto)
- XORG_DRIVER_CHECK_EXT(DPMSExtension, xextproto)
+diff -up xf86-video-nouveau-1.0.10/configure.ac.jx xf86-video-nouveau-1.0.10/configure.ac
+--- xf86-video-nouveau-1.0.10/configure.ac.jx	2013-11-06 23:59:45.000000000 -0500
++++ xf86-video-nouveau-1.0.10/configure.ac	2014-04-23 18:32:34.724652339 -0400
+@@ -81,7 +81,7 @@ XORG_DRIVER_CHECK_EXT(DRI2, [dri2proto >
  
  # Checks for pkg-config packages
+ PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.17])
 -PKG_CHECK_MODULES(LIBDRM_NOUVEAU, [libdrm_nouveau >= 2.4.25])
 +PKG_CHECK_MODULES(LIBDRM_NOUVEAU, [libdrm_nouveau2 >= 2.4.25])
  AC_SUBST(LIBDRM_NOUVEAU_CFLAGS)
  AC_SUBST(LIBDRM_NOUVEAU_LIBS)
  
--- 
-1.7.1
-

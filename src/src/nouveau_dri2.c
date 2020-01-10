@@ -7,9 +7,10 @@
 #include "nv_include.h"
 #ifdef DRI2
 #include "dri2.h"
+#else
+#error "This driver requires a DRI2-enabled X server"
 #endif
 
-#if defined(DRI2) && DRI2INFOREC_VERSION >= 3
 struct nouveau_dri2_buffer {
 	DRI2BufferRec base;
 	PixmapPtr ppix;
@@ -21,34 +22,40 @@ nouveau_dri2_buffer(DRI2BufferPtr buf)
 	return (struct nouveau_dri2_buffer *)buf;
 }
 
+static PixmapPtr get_drawable_pixmap(DrawablePtr drawable)
+{
+	if (drawable->type == DRAWABLE_PIXMAP)
+		return (PixmapPtr)drawable;
+	else
+		return (*drawable->pScreen->GetWindowPixmap)((WindowPtr)drawable);
+}
+
 DRI2BufferPtr
-nouveau_dri2_create_buffer(DrawablePtr pDraw, unsigned int attachment,
+nouveau_dri2_create_buffer2(ScreenPtr pScreen, DrawablePtr pDraw, unsigned int attachment,
 			   unsigned int format)
 {
-	ScreenPtr pScreen = pDraw->pScreen;
 	NVPtr pNv = NVPTR(xf86ScreenToScrn(pScreen));
 	struct nouveau_dri2_buffer *nvbuf;
 	struct nouveau_pixmap *nvpix;
-	PixmapPtr ppix;
+	PixmapPtr ppix = NULL;
 
 	nvbuf = calloc(1, sizeof(*nvbuf));
 	if (!nvbuf)
 		return NULL;
 
 	if (attachment == DRI2BufferFrontLeft) {
-		if (pDraw->type == DRAWABLE_PIXMAP) {
-			ppix = (PixmapPtr)pDraw;
-		} else {
-			WindowPtr pwin = (WindowPtr)pDraw;
-			ppix = pScreen->GetWindowPixmap(pwin);
+		ppix = get_drawable_pixmap(pDraw);
+		if (pScreen != ppix->drawable.pScreen)
+			ppix = NULL;
 
+		if (pDraw->type == DRAWABLE_WINDOW) {
 #if DRI2INFOREC_VERSION >= 6
 			/* Set initial swap limit on drawable. */
 			DRI2SwapLimit(pDraw, pNv->swap_limit);
 #endif
 		}
-
-		ppix->refcnt++;
+		if (ppix)
+			ppix->refcnt++;
 	} else {
 		int bpp;
 		unsigned int usage_hint = NOUVEAU_CREATE_PIXMAP_TILED;
@@ -67,31 +74,43 @@ nouveau_dri2_create_buffer(DrawablePtr pDraw, unsigned int attachment,
 					     usage_hint);
 	}
 
-	pNv->exa_force_cp = TRUE;
-	exaMoveInPixmap(ppix);
-	pNv->exa_force_cp = FALSE;
+	if (ppix) {
+		pNv->exa_force_cp = TRUE;
+		exaMoveInPixmap(ppix);
+		pNv->exa_force_cp = FALSE;
+
+		nvbuf->base.pitch = ppix->devKind;
+		nvbuf->base.cpp = ppix->drawable.bitsPerPixel / 8;
+	}
 
 	nvbuf->base.attachment = attachment;
-	nvbuf->base.pitch = ppix->devKind;
-	nvbuf->base.cpp = ppix->drawable.bitsPerPixel / 8;
 	nvbuf->base.driverPrivate = nvbuf;
 	nvbuf->base.format = format;
 	nvbuf->base.flags = 0;
 	nvbuf->ppix = ppix;
 
-	nvpix = nouveau_pixmap(ppix);
-	if (!nvpix || !nvpix->bo ||
-	    nouveau_bo_name_get(nvpix->bo, &nvbuf->base.name)) {
-		pScreen->DestroyPixmap(nvbuf->ppix);
-		free(nvbuf);
-		return NULL;
+	if (ppix) {
+		nvpix = nouveau_pixmap(ppix);
+		if (!nvpix || !nvpix->bo ||
+		    nouveau_bo_name_get(nvpix->bo, &nvbuf->base.name)) {
+			pScreen->DestroyPixmap(nvbuf->ppix);
+			free(nvbuf);
+			return NULL;
+		}
 	}
-
 	return &nvbuf->base;
 }
 
+DRI2BufferPtr
+nouveau_dri2_create_buffer(DrawablePtr pDraw, unsigned int attachment,
+			   unsigned int format)
+{
+	return nouveau_dri2_create_buffer2(pDraw->pScreen, pDraw,
+					   attachment, format);
+}
+
 void
-nouveau_dri2_destroy_buffer(DrawablePtr pDraw, DRI2BufferPtr buf)
+nouveau_dri2_destroy_buffer2(ScreenPtr pScreen, DrawablePtr pDraw, DRI2BufferPtr buf)
 {
 	struct nouveau_dri2_buffer *nvbuf;
 
@@ -99,36 +118,97 @@ nouveau_dri2_destroy_buffer(DrawablePtr pDraw, DRI2BufferPtr buf)
 	if (!nvbuf)
 		return;
 
-	pDraw->pScreen->DestroyPixmap(nvbuf->ppix);
+	if (nvbuf->ppix)
+	    pScreen->DestroyPixmap(nvbuf->ppix);
 	free(nvbuf);
+}
+
+void
+nouveau_dri2_destroy_buffer(DrawablePtr pDraw, DRI2BufferPtr buf)
+{
+	nouveau_dri2_destroy_buffer2(pDraw->pScreen, pDraw, buf);
+}
+
+void
+nouveau_dri2_copy_region2(ScreenPtr pScreen, DrawablePtr pDraw, RegionPtr pRegion,
+			 DRI2BufferPtr pDstBuffer, DRI2BufferPtr pSrcBuffer)
+{
+	struct nouveau_dri2_buffer *src = nouveau_dri2_buffer(pSrcBuffer);
+	struct nouveau_dri2_buffer *dst = nouveau_dri2_buffer(pDstBuffer);
+	NVPtr pNv = NVPTR(xf86ScreenToScrn(pScreen));
+	RegionPtr pCopyClip;
+	GCPtr pGC;
+	DrawablePtr src_draw, dst_draw;
+	Bool translate = FALSE;
+	int off_x = 0, off_y = 0;
+
+	src_draw = &src->ppix->drawable;
+	dst_draw = &dst->ppix->drawable;
+#if 0
+	ErrorF("attachments src %d, dst %d, drawable %p %p pDraw %p\n",
+	       src->base.attachment, dst->base.attachment,
+	       src_draw, dst_draw, pDraw);
+#endif
+	if (src->base.attachment == DRI2BufferFrontLeft)
+		src_draw = pDraw;
+	if (dst->base.attachment == DRI2BufferFrontLeft) {
+#ifdef NOUVEAU_PIXMAP_SHARING
+		if (pDraw->pScreen != pScreen) {
+			dst_draw = DRI2UpdatePrime(pDraw, pDstBuffer);
+			if (!dst_draw)
+				return;
+		} 
+		else
+#endif
+			dst_draw = pDraw;
+		if (dst_draw != pDraw)
+			translate = TRUE;
+	}
+
+	if (translate && pDraw->type == DRAWABLE_WINDOW) {
+		PixmapPtr pPix = get_drawable_pixmap(pDraw);
+		off_x = pDraw->x - pPix->screen_x;
+		off_y = pDraw->y - pPix->screen_y;
+	}
+
+	pGC = GetScratchGC(pDraw->depth, pScreen);
+	pCopyClip = REGION_CREATE(pScreen, NULL, 0);
+	REGION_COPY(pScreen, pCopyClip, pRegion);
+
+	if (translate) {
+		REGION_TRANSLATE(pScreen, pCopyClip, off_x, off_y);
+	}
+	pGC->funcs->ChangeClip(pGC, CT_REGION, pCopyClip, 0);
+	ValidateGC(dst_draw, pGC);
+
+	/* If this is a full buffer swap or frontbuffer flush, throttle on
+	 * the previous one.
+	 */
+	if (dst->base.attachment == DRI2BufferFrontLeft &&
+	    REGION_NUM_RECTS(pRegion) == 1) {
+		BoxPtr extents = REGION_EXTENTS(pScreen, pRegion);
+		if (extents->x1 == 0 && extents->y1 == 0 &&
+		    extents->x2 == pDraw->width &&
+		    extents->y2 == pDraw->height) {
+			PixmapPtr fpix = get_drawable_pixmap(dst_draw);
+			struct nouveau_bo *bo = nouveau_pixmap_bo(fpix);
+			if (bo)
+				nouveau_bo_wait(bo, NOUVEAU_BO_RD, pNv->client);
+		}
+	}
+
+	pGC->ops->CopyArea(src_draw, dst_draw, pGC, 0, 0,
+			   pDraw->width, pDraw->height, off_x, off_y);
+
+	FreeScratchGC(pGC);
 }
 
 void
 nouveau_dri2_copy_region(DrawablePtr pDraw, RegionPtr pRegion,
 			 DRI2BufferPtr pDstBuffer, DRI2BufferPtr pSrcBuffer)
 {
-	struct nouveau_dri2_buffer *src = nouveau_dri2_buffer(pSrcBuffer);
-	struct nouveau_dri2_buffer *dst = nouveau_dri2_buffer(pDstBuffer);
-	PixmapPtr pspix = src->ppix, pdpix = dst->ppix;
-	ScreenPtr pScreen = pDraw->pScreen;
-	RegionPtr pCopyClip;
-	GCPtr pGC;
-
-	if (src->base.attachment == DRI2BufferFrontLeft)
-		pspix = (PixmapPtr)pDraw;
-	if (dst->base.attachment == DRI2BufferFrontLeft)
-		pdpix = (PixmapPtr)pDraw;
-
-	pGC = GetScratchGC(pDraw->depth, pScreen);
-	pCopyClip = REGION_CREATE(pScreen, NULL, 0);
-	REGION_COPY(pScreen, pCopyClip, pRegion);
-	pGC->funcs->ChangeClip(pGC, CT_REGION, pCopyClip, 0);
-	ValidateGC(&pdpix->drawable, pGC);
-
-	pGC->ops->CopyArea(&pspix->drawable, &pdpix->drawable, pGC, 0, 0,
-			   pDraw->width, pDraw->height, 0, 0);
-
-	FreeScratchGC(pGC);
+    return nouveau_dri2_copy_region2(pDraw->pScreen, pDraw, pRegion,
+				     pDstBuffer, pSrcBuffer);
 }
 
 struct nouveau_dri2_vblank_state {
@@ -169,7 +249,9 @@ update_front(DrawablePtr draw, DRI2BufferPtr front)
 		return FALSE;
 	}
 
-	(*draw->pScreen->DestroyPixmap)(nvbuf->ppix);
+	if (nvbuf->ppix)
+		(*draw->pScreen->DestroyPixmap)(nvbuf->ppix);
+
 	front->pitch = pixmap->devKind;
 	front->cpp = pixmap->drawable.bitsPerPixel / 8;
 	nvbuf->ppix = pixmap;
@@ -184,6 +266,9 @@ can_exchange(DrawablePtr draw, PixmapPtr dst_pix, PixmapPtr src_pix)
 	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
 	NVPtr pNv = NVPTR(scrn);
 	int i;
+
+	if (!xf86_config->num_crtc)
+		return FALSE;
 
 	for (i = 0; i < xf86_config->num_crtc; i++) {
 		xf86CrtcPtr crtc = xf86_config->crtc[i];
@@ -316,6 +401,9 @@ nouveau_dri2_finish_swap(DrawablePtr draw, unsigned int frame,
 					   NOUVEAU_BO_VRAM | NOUVEAU_BO_RD
 				     }, 1);
 
+		if (pNv->Architecture >= NV_ARCH_C0)
+			NVC0SyncToVBlank(dst_pix, REGION_EXTENTS(0, &reg));
+		else
 		if (pNv->Architecture >= NV_ARCH_50)
 			NV50SyncToVBlank(dst_pix, REGION_EXTENTS(0, &reg));
 		else
@@ -412,6 +500,7 @@ nouveau_dri2_schedule_swap(ClientPtr client, DrawablePtr draw,
 {
 	struct nouveau_dri2_vblank_state *s;
 	CARD64 current_msc, expect_msc;
+	CARD64 current_ust;
 	int ret;
 
 	/* Initialize a swap structure */
@@ -423,9 +512,9 @@ nouveau_dri2_schedule_swap(ClientPtr client, DrawablePtr draw,
 		{ SWAP, client, draw->id, dst, src, func, data, 0 };
 
 	if (can_sync_to_vblank(draw)) {
-		/* Get current sequence */
+		/* Get current sequence and vblank time*/
 		ret = nouveau_wait_vblank(draw, DRM_VBLANK_RELATIVE, 0,
-					  &current_msc, NULL, NULL);
+					  &current_msc, &current_ust, NULL);
 		if (ret)
 			goto fail;
 
@@ -445,24 +534,48 @@ nouveau_dri2_schedule_swap(ClientPtr client, DrawablePtr draw,
 		if (*target_msc == 0)
 			*target_msc = 1;
 
+		/* Swap at next possible vblank requested? */
+		if (current_msc >= *target_msc - 1) {
+			/* Special case: Need to swap at next vblank.
+			 * Schedule swap immediately, bypassing the kernel
+			 * vblank event mechanism to avoid a dangerous race
+			 * between the client and the x-server vblank event
+			 * dispatch in the main x-server dispatch loop when
+			 * the swap_limit is set to 2 for triple-buffering.
+			 *
+			 * This also optimizes for the common case of swap
+			 * at next vblank, avoiding vblank dispatch delay.
+			 */
+			s->frame = 1 + ((unsigned int) current_msc & 0xffffffff);
+			*target_msc = 1 + current_msc;
+			nouveau_dri2_finish_swap(draw, current_msc,
+						 (unsigned int) (current_ust / 1000000),
+						 (unsigned int) (current_ust % 1000000),
+						 s);
+			return TRUE;
+		}
+
+		/* This is a swap in the future, ie. the vblank event will
+		 * only get dispatched at least 2 vblanks into the future.
+		 */
+
 #if DRI2INFOREC_VERSION >= 6
-		/* Is this a swap in the future, ie. the vblank event will
-		 * not be immediately dispatched, but only at a future vblank?
-		 * If so, we need to temporarily lower the swaplimit to 1, so
-		 * that DRI2GetBuffersWithFormat() requests from the client get
+		/* On XOrg 1.12+ we need to temporarily lower the swaplimit to 1,
+		 * so that DRI2GetBuffersWithFormat() requests from the client get
 		 * deferred in the x-server until the vblank event has been
 		 * dispatched to us and nouveau_dri2_finish_swap() is done. If
 		 * we wouldn't do this, DRI2GetBuffersWithFormat() would operate
 		 * on wrong (pre-swap) buffers, and cause a segfault later on in
-		 * nouveau_dri2_finish_swap(). Our vblank event handler restores
+		 * nouveau_dri2_finish_swap(). Our vblank event handler will restore
 		 * the old swaplimit immediately after nouveau_dri2_finish_swap()
-		 * is done, so we still get 1 video refresh cycle worth of
-		 * triple-buffering. For a swap at next vblank, dispatch of the
-		 * vblank event happens immediately, so there isn't any need
-		 * for this lowered swaplimit.
+		 * is done, so we still get 1 video refresh cycle worth of triple-
+		 * buffering, because the client can start rendering again 1 cycle
+		 * before the pending swap is completed.
+		 *
+		 * The same race would happen for the "swap at next vblank" case,
+		 * but the special case "swap immediately" code above prevents this.
 		 */
-		if (current_msc < *target_msc - 1)
-			DRI2SwapLimit(draw, 1);
+		DRI2SwapLimit(draw, 1);
 #endif
 
 		/* Request a vblank event one frame before the target */
@@ -686,6 +799,17 @@ nouveau_dri2_init(ScreenPtr pScreen)
 	dri2.SwapLimitValidate = nouveau_dri2_swap_limit_validate;
 #endif
 
+#if DRI2INFOREC_VERSION >= 7
+	dri2.version = 7;
+	dri2.GetParam = NULL;
+#endif
+
+#if DRI2INFOREC_VERSION >= 9
+	dri2.version = 9;
+	dri2.CreateBuffer2 = nouveau_dri2_create_buffer2;
+	dri2.DestroyBuffer2 = nouveau_dri2_destroy_buffer2;
+	dri2.CopyRegion2 = nouveau_dri2_copy_region2;
+#endif
 	return DRI2ScreenInit(pScreen, &dri2);
 }
 
@@ -694,16 +818,3 @@ nouveau_dri2_fini(ScreenPtr pScreen)
 {
 	DRI2CloseScreen(pScreen);
 }
-#else
-Bool
-nouveau_dri2_init(ScreenPtr pScreen)
-{
-	return TRUE;
-}
-
-void
-nouveau_dri2_fini(ScreenPtr pScreen)
-{
-}
-#endif
-

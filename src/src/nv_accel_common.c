@@ -35,9 +35,18 @@ nouveau_allocate_surface(ScrnInfoPtr scrn, int width, int height, int bpp,
 	NVPtr pNv = NVPTR(scrn);
 	Bool scanout = (usage_hint & NOUVEAU_CREATE_PIXMAP_SCANOUT);
 	Bool tiled = (usage_hint & NOUVEAU_CREATE_PIXMAP_TILED);
+	Bool shared = FALSE;
 	union nouveau_bo_config cfg = {};
 	int flags = NOUVEAU_BO_MAP | (bpp >= 8 ? NOUVEAU_BO_VRAM : 0);
 	int cpp = bpp / 8, ret;
+
+#ifdef NOUVEAU_PIXMAP_SHARING
+	shared = ((usage_hint & 0xffff) == CREATE_PIXMAP_USAGE_SHARED);
+#endif
+
+	flags = NOUVEAU_BO_MAP;
+	if (bpp >= 8)
+		flags |= shared ? NOUVEAU_BO_GART : NOUVEAU_BO_VRAM;
 
 	if (pNv->Architecture >= NV_ARCH_50) {
 		if (scanout) {
@@ -48,9 +57,9 @@ nouveau_allocate_surface(ScrnInfoPtr scrn, int width, int height, int bpp,
 				*pitch = NOUVEAU_ALIGN(width * cpp, 256);
 			}
 		} else {
-			if (bpp >= 8)
+			if (bpp >= 8 && !shared)
 				tiled = TRUE;
-			*pitch = NOUVEAU_ALIGN(width * cpp, 64);
+			*pitch = NOUVEAU_ALIGN(width * cpp, shared ? 256 : 64);
 		}
 	} else {
 		if (scanout && pNv->tiled_scanout)
@@ -640,8 +649,10 @@ NVAccelCommonInit(ScrnInfoPtr pScrn)
 	else
 	if (pNv->Architecture < NV_ARCH_E0)
 		INIT_CONTEXT_OBJECT(M2MF_NVC0);
-	else
+	else {
 		INIT_CONTEXT_OBJECT(P2MF_NVE0);
+		INIT_CONTEXT_OBJECT(COPY_NVE0);
+	}
 
 	/* 3D init */
 	switch (pNv->Architecture) {
@@ -693,6 +704,7 @@ void NVAccelFree(ScrnInfoPtr pScrn)
 	nouveau_object_del(&pNv->NvMemFormat);
 	nouveau_object_del(&pNv->NvSW);
 	nouveau_object_del(&pNv->Nv3D);
+	nouveau_object_del(&pNv->NvCOPY);
 
 	nouveau_bo_ref(NULL, &pNv->scratch);
 }

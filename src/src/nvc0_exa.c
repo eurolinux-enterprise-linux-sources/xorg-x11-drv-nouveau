@@ -95,10 +95,11 @@ NVC0EXAAcquireSurface2D(PixmapPtr ppix, int is_src, uint32_t fmt)
 {
 	NVC0EXA_LOCALS(ppix);
 	struct nouveau_bo *bo = nouveau_pixmap_bo(ppix);
+	struct nouveau_pixmap *nvpix = nouveau_pixmap(ppix);
 	int mthd = is_src ? NV50_2D_SRC_FORMAT : NV50_2D_DST_FORMAT;
 	uint32_t bo_flags;
 
-	bo_flags  = NOUVEAU_BO_VRAM;
+	bo_flags = nvpix->shared ? NOUVEAU_BO_GART : NOUVEAU_BO_VRAM;
 	bo_flags |= is_src ? NOUVEAU_BO_RD : NOUVEAU_BO_WR;
 
 	if (!nv50_style_tiled_pixmap(ppix)) {
@@ -458,14 +459,19 @@ NVC0EXARenderTarget(PixmapPtr ppix, PicturePtr ppict)
 static Bool
 NVC0EXACheckTexture(PicturePtr ppict, PicturePtr pdpict, int op)
 {
-	if (!ppict->pDrawable)
-		NOUVEAU_FALLBACK("Solid and gradient pictures unsupported.\n");
-
-	if (ppict->pDrawable->width > 8192 ||
-	    ppict->pDrawable->height > 8192)
-		NOUVEAU_FALLBACK("texture dimensions exceeded %dx%d\n",
-				 ppict->pDrawable->width,
-				 ppict->pDrawable->height);
+	if (ppict->pDrawable) {
+		if (ppict->pDrawable->width > 8192 ||
+		    ppict->pDrawable->height > 8192)
+			NOUVEAU_FALLBACK("texture too large\n");
+	} else {
+		switch (ppict->pSourcePict->type) {
+		case SourcePictTypeSolidFill:
+			break;
+		default:
+			NOUVEAU_FALLBACK("pict %d\n", ppict->pSourcePict->type);
+			break;
+		}
+	}
 
 	switch (ppict->format) {
 	case PICT_a8r8g8b8:
@@ -658,9 +664,9 @@ NVC0EXAPictTexture(NVPtr pNv, PixmapPtr ppix, PicturePtr ppict, unsigned unit)
 		switch (ppict->repeatType) {
 		case RepeatPad:
 			PUSH_DATA (push, 0x00024000 |
-					 NV50TSC_1_0_WRAPS_CLAMP |
-					 NV50TSC_1_0_WRAPT_CLAMP |
-					 NV50TSC_1_0_WRAPR_CLAMP);
+					 NV50TSC_1_0_WRAPS_CLAMP_TO_EDGE |
+					 NV50TSC_1_0_WRAPT_CLAMP_TO_EDGE |
+					 NV50TSC_1_0_WRAPR_CLAMP_TO_EDGE);
 			break;
 		case RepeatReflect:
 			PUSH_DATA (push, 0x00024000 |
@@ -825,10 +831,8 @@ NVC0EXAPrepareComposite(int op,
 			PicturePtr pspict, PicturePtr pmpict, PicturePtr pdpict,
 			PixmapPtr pspix, PixmapPtr pmpix, PixmapPtr pdpix)
 {
-	struct nouveau_bo *src = nouveau_pixmap_bo(pspix);
 	struct nouveau_bo *dst = nouveau_pixmap_bo(pdpix);
-	struct nouveau_bo *mask = pmpix ? nouveau_pixmap_bo(pmpix) : NULL;
-	NVC0EXA_LOCALS(pspix);
+	NVC0EXA_LOCALS(pdpix);
 
 	if (!PUSH_SPACE(push, 256))
 		NOUVEAU_FALLBACK("space\n");
@@ -880,10 +884,13 @@ NVC0EXAPrepareComposite(int op,
 
 	PUSH_RESET(push);
 	PUSH_REFN (push, pNv->scratch, NOUVEAU_BO_VRAM | NOUVEAU_BO_RDWR);
-	PUSH_REFN (push, src, NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
+	if (pspict->pDrawable)
+		PUSH_REFN (push, nouveau_pixmap_bo(pspix),
+			   NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
 	PUSH_REFN (push, dst, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-	if (pmpict)
-		PUSH_REFN (push, mask, NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
+	if (pmpict && pmpict->pDrawable)
+		PUSH_REFN (push, nouveau_pixmap_bo(pmpix),
+			   NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
 
 	nouveau_pushbuf_bufctx(push, pNv->bufctx);
 	if (nouveau_pushbuf_validate(push)) {

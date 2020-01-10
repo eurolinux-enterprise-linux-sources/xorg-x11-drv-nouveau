@@ -94,10 +94,11 @@ NV50EXAAcquireSurface2D(PixmapPtr ppix, int is_src, uint32_t fmt)
 {
 	NV50EXA_LOCALS(ppix);
 	struct nouveau_bo *bo = nouveau_pixmap_bo(ppix);
+	struct nouveau_pixmap *nvpix = nouveau_pixmap(ppix);
 	int mthd = is_src ? NV50_2D_SRC_FORMAT : NV50_2D_DST_FORMAT;
 	uint32_t bo_flags;
 
-	bo_flags  = NOUVEAU_BO_VRAM;
+	bo_flags = nvpix->shared ? NOUVEAU_BO_GART : NOUVEAU_BO_VRAM;
 	bo_flags |= is_src ? NOUVEAU_BO_RD : NOUVEAU_BO_WR;
 
 	if (!nv50_style_tiled_pixmap(ppix)) {
@@ -664,9 +665,9 @@ NV50EXAPictTexture(NVPtr pNv, PixmapPtr ppix, PicturePtr ppict, unsigned unit)
 	if (ppict->repeat) {
 		switch (ppict->repeatType) {
 		case RepeatPad:
-			PUSH_DATA (push, NV50TSC_1_0_WRAPS_CLAMP |
-				 NV50TSC_1_0_WRAPT_CLAMP |
-				 NV50TSC_1_0_WRAPR_CLAMP | 0x00024000);
+			PUSH_DATA (push, NV50TSC_1_0_WRAPS_CLAMP_TO_EDGE |
+				 NV50TSC_1_0_WRAPT_CLAMP_TO_EDGE |
+				 NV50TSC_1_0_WRAPR_CLAMP_TO_EDGE | 0x00024000);
 			break;
 		case RepeatReflect:
 			PUSH_DATA (push, NV50TSC_1_0_WRAPS_MIRROR_REPEAT |

@@ -7,8 +7,8 @@ Summary:   Xorg X11 nouveau video driver for NVIDIA graphics chipsets
 Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
-Version:   1.0.1
-Release:   4%{?dist}
+Version:   1.0.10
+Release:   1%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -24,7 +24,6 @@ Source1: make-git-snapshot.sh
 ExcludeArch: s390 s390x
 Patch0:  xorg-x11-drv-nouveau-ppc.patch
 Patch1:  xorg-x11-drv-nouveau-libdrm2.patch
-Patch2:  xorg-x11-drv-nouveau-1.0.1-shadowfb.patch
 Patch3:  xorg-x11-drv-nouveau-tmcoords.patch
 
 BuildRequires: libtool automake autoconf
@@ -54,11 +53,11 @@ X.Org X11 nouveau video driver.
 %prep
 %setup -q -n xf86-video-nouveau-%{dirsuffix}
 %ifarch ppc %{power64}
-%patch0 -p1
+# FIXME
+#patch0 -p1
 %endif
 %patch1 -p1
-%patch2 -p1
-%patch3 -p1
+#patch3 -p1
 
 %build
 autoreconf -v --install --force
@@ -82,6 +81,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Wed Apr 23 2014 Adam Jackson <ajax@redhat.com> 1.0.10-1
+- nouveau 1.0.10
+
 * Thu Aug 01 2013 bskeggs@redhat.com - 1:1.0.1-4
 - fix transformed mask rendercheck test (rhbz#876566)
 

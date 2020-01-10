@@ -23,10 +23,10 @@
 # -avoid-version prevents gratuitous .0.0.0 version numbers on the end
 # _ladir passes a dummy rpath to libtool so the thing will actually link
 # TODO: -nostdlib/-Bstatic/-lgcc platform magic, not installing the .a, etc.
-AM_CFLAGS = @XORG_CFLAGS@ @LIBUDEV_CFLAGS@ @LIBDRM_NOUVEAU_CFLAGS@
+AM_CFLAGS = @XORG_CFLAGS@ @LIBUDEV_CFLAGS@ @LIBDRM_NOUVEAU_CFLAGS@ @LIBDRM_CFLAGS@
 nouveau_drv_la_LTLIBRARIES = nouveau_drv.la
 nouveau_drv_la_LDFLAGS = -module -avoid-version @LIBDRM_NOUVEAU_LIBS@ \
-			 @LIBUDEV_LIBS@
+			 @LIBUDEV_LIBS@ @LIBDRM_LIBS@
 nouveau_drv_ladir = @moduledir@/drivers
 
 nouveau_drv_la_SOURCES = \
@@ -66,6 +66,55 @@ EXTRA_DIST = hwdefs/nv_3ddefs.xml.h \
 	     hwdefs/nv50_texture.h \
 	     hwdefs/nvc0_3d.xml.h \
 	     hwdefs/nvc0_m2mf.xml.h \
+	     shader/exac8nvc0.fp \
+	     shader/exac8nvc0.fpc \
+	     shader/exac8nve0.fp \
+	     shader/exac8nve0.fpc \
+	     shader/exac8nvf0.fp \
+	     shader/exac8nvf0.fpc \
+	     shader/exacanvc0.fp \
+	     shader/exacanvc0.fpc \
+	     shader/exacanve0.fp \
+	     shader/exacanve0.fpc \
+	     shader/exacanvf0.fp \
+	     shader/exacanvf0.fpc \
+	     shader/exacmnvc0.fp \
+	     shader/exacmnvc0.fpc \
+	     shader/exacmnve0.fp \
+	     shader/exacmnve0.fpc \
+	     shader/exacmnvf0.fp \
+	     shader/exacmnvf0.fpc \
+	     shader/exas8nvc0.fp \
+	     shader/exas8nvc0.fpc \
+	     shader/exas8nve0.fp \
+	     shader/exas8nve0.fpc \
+	     shader/exas8nvf0.fp \
+	     shader/exas8nvf0.fpc \
+	     shader/exasanvc0.fp \
+	     shader/exasanvc0.fpc \
+	     shader/exasanve0.fp \
+	     shader/exasanve0.fpc \
+	     shader/exasanvf0.fp \
+	     shader/exasanvf0.fpc \
+	     shader/exascnvc0.fp \
+	     shader/exascnvc0.fpc \
+	     shader/exascnve0.fp \
+	     shader/exascnve0.fpc \
+	     shader/exascnvf0.fp \
+	     shader/exascnvf0.fpc \
+	     shader/videonvc0.fp \
+	     shader/videonvc0.fpc \
+	     shader/videonve0.fp \
+	     shader/videonve0.fpc \
+	     shader/videonvf0.fp \
+	     shader/videonvf0.fpc \
+	     shader/xfrm2nvc0.vp \
+	     shader/xfrm2nvc0.vpc \
+	     shader/xfrm2nve0.vp \
+	     shader/xfrm2nve0.vpc \
+	     shader/xfrm2nvf0.vp \
+	     shader/xfrm2nvf0.vpc \
+	     shader/Makefile \
 	     nouveau_local.h \
 	     nv_const.h \
 	     nv_dma.h \
@@ -76,8 +125,6 @@ EXTRA_DIST = hwdefs/nv_3ddefs.xml.h \
 	     nv04_accel.h \
 	     nv50_accel.h \
 	     nvc0_accel.h \
-	     nvc0_shader.h \
-	     nve0_shader.h \
 	     compat-api.h \
 	     vl_hwmc.c \
 	     vl_hwmc.h
