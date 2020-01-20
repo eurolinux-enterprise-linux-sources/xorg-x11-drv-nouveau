@@ -9,8 +9,8 @@ Summary:   Xorg X11 nouveau video driver for NVIDIA graphics chipsets
 Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
-Version:   1.0.13
-Release:   3%{?dist}
+Version:   1.0.15
+Release:   1%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -19,12 +19,9 @@ Group:     User Interface/X Hardware Support
 %if 0%{?gitdate}
 Source0: xf86-video-nouveau-%{gitdate}.tar.xz
 %else
-Source0: http://xorg.freedesktop.org/archive/individual/driver/xf86-video-nouveau-%{version}.tar.bz2
+Source0: https://xorg.freedesktop.org/archive/individual/driver/xf86-video-nouveau-%{version}.tar.bz2
 %endif
 Source1: make-git-snapshot.sh
-
-Patch0: nouveau-1.0.13-fix-pageflipping-with-atomic.patch
-Patch1: 0001-modesetting-Validate-the-atom-for-enum-properties.patch
 
 ExcludeArch: s390 s390x
 
@@ -52,9 +49,7 @@ X.Org X11 nouveau video driver.
 %endif
 
 %prep
-%setup -q -n xf86-video-nouveau-%{dirsuffix}
-%patch0 -p1
-%patch1 -p1
+%autosetup -p1 -n xf86-video-nouveau-%{dirsuffix}
 
 %build
 autoreconf -v --install --force
@@ -70,6 +65,12 @@ find $RPM_BUILD_ROOT -regex ".*\.la$" | xargs rm -f --
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Wed May 30 2018 Adam Jackson <ajax@redhat.com> - 1.0.15-1
+- nouveau 1.0.15
+
+* Wed May 30 2018 Adam Jackson <ajax@redhat.com> - 1:1.0.13-3.1
+- Rebuild for xserver 1.20
+
 * Mon Jun 19 2017 Adam Jackson <ajax@redhat.com> - 1.0.13-3
 - Validate RANDR output property atoms
 
