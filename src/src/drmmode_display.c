@@ -42,8 +42,6 @@
 #include "libudev.h"
 #endif
 
-#include "nouveau_glamor.h"
-
 static Bool drmmode_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height);
 typedef struct {
     int fd;
@@ -106,9 +104,6 @@ drmmode_from_scrn(ScrnInfoPtr scrn)
 static inline struct nouveau_pixmap *
 drmmode_pixmap(PixmapPtr ppix)
 {
-	NVPtr pNv = NVPTR(xf86ScreenToScrn(ppix->drawable.pScreen));
-	if (pNv->AccelMethod == GLAMOR)
-		return nouveau_glamor_pixmap_get(ppix);
 	return nouveau_pixmap(ppix);
 }
 
@@ -332,13 +327,24 @@ drmmode_fbcon_copy(ScreenPtr pScreen)
 	ExaDriverPtr exa = pNv->EXADriverPtr;
 	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
 	struct nouveau_bo *bo = NULL;
-	PixmapPtr pspix, pdpix;
+	PixmapPtr pspix, pdpix = NULL;
 	drmModeFBPtr fb;
 	unsigned w = pScrn->virtualX, h = pScrn->virtualY;
 	int i, ret, fbcon_id = 0;
 
 	if (pNv->AccelMethod != EXA)
 		goto fallback;
+
+	pdpix = drmmode_pixmap_wrap(pScreen, pScrn->virtualX,
+				    pScrn->virtualY, pScrn->depth,
+				    pScrn->bitsPerPixel, pScrn->displayWidth *
+				    pScrn->bitsPerPixel / 8, pNv->scanout,
+				    NULL);
+	if (!pdpix) {
+		xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
+			   "Failed to init scanout pixmap for fbcon mirror\n");
+		goto fallback;
+	}
 
 	for (i = 0; i < xf86_config->num_crtc; i++) {
 		drmmode_crtc_private_ptr drmmode_crtc =
@@ -382,18 +388,6 @@ drmmode_fbcon_copy(ScreenPtr pScreen)
 		goto fallback;
 	}
 
-	pdpix = drmmode_pixmap_wrap(pScreen, pScrn->virtualX,
-				    pScrn->virtualY, pScrn->depth,
-				    pScrn->bitsPerPixel, pScrn->displayWidth *
-				    pScrn->bitsPerPixel / 8, pNv->scanout,
-				    NULL);
-	if (!pdpix) {
-		xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
-			   "Failed to init scanout pixmap for fbcon mirror\n");
-		pScreen->DestroyPixmap(pspix);
-		goto fallback;
-	}
-
 	exa->PrepareCopy(pspix, pdpix, 0, 0, GXcopy, ~0);
 	exa->Copy(pdpix, 0, 0, 0, 0, w, h);
 	exa->DoneCopy(pdpix);
@@ -410,6 +404,17 @@ drmmode_fbcon_copy(ScreenPtr pScreen)
 	return;
 
 fallback:
+	if (pdpix) {
+		if (exa->PrepareSolid(pdpix, GXcopy, ~0, 0)) {
+			exa->Solid(pdpix, 0, 0, w, h);
+			exa->DoneSolid(pdpix);
+			PUSH_KICK(pNv->pushbuf);
+			nouveau_bo_wait(pNv->scanout, NOUVEAU_BO_RDWR, pNv->client);
+			pScreen->DestroyPixmap(pdpix);
+			return;
+		}
+		pScreen->DestroyPixmap(pdpix);
+	}
 #endif
 	if (nouveau_bo_map(pNv->scanout, NOUVEAU_BO_WR, pNv->client))
 		return;
@@ -675,10 +680,16 @@ drmmode_set_scanout_pixmap(xf86CrtcPtr crtc, PixmapPtr ppix)
 	PixmapPtr screenpix = screen->GetScreenPixmap(screen);
 	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
 	drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
+	drmmode_ptr drmmode = drmmode_crtc->drmmode;
 	int c, total_width = 0, max_height = 0, this_x = 0;
 	if (!ppix) {
-		if (crtc->randr_crtc->scanout_pixmap)
+		if (crtc->randr_crtc->scanout_pixmap) {
 			PixmapStopDirtyTracking(crtc->randr_crtc->scanout_pixmap, screenpix);
+			if (drmmode && drmmode->fb_id) {
+				drmModeRmFB(drmmode->fd, drmmode->fb_id);
+				drmmode->fb_id = 0;
+			}
+		}
 		drmmode_crtc->scanout_pixmap_x = 0;
 		return TRUE;
 	}
@@ -699,7 +710,7 @@ drmmode_set_scanout_pixmap(xf86CrtcPtr crtc, PixmapPtr ppix)
 			if (max_height < iter->mode.VDisplay)
 				max_height = iter->mode.VDisplay;
 		}
-#ifndef HAS_DIRTYTRACKING2
+#if !defined(HAS_DIRTYTRACKING_ROTATION) && !defined(HAS_DIRTYTRACKING2)
 	if (iter != crtc) {
 		ErrorF("Cannot do multiple crtcs without X server dirty tracking 2 interface\n");
 		return FALSE;
@@ -719,7 +730,9 @@ drmmode_set_scanout_pixmap(xf86CrtcPtr crtc, PixmapPtr ppix)
 		screen->height = screenpix->drawable.height = max_height;
 	}
 	drmmode_crtc->scanout_pixmap_x = this_x;
-#ifdef HAS_DIRTYTRACKING2
+#ifdef HAS_DIRTYTRACKING_ROTATION
+	PixmapStartDirtyTracking(ppix, screenpix, 0, 0, this_x, 0, RR_Rotate_0);
+#elif defined(HAS_DIRTYTRACKING2)
 	PixmapStartDirtyTracking2(ppix, screenpix, 0, 0, this_x, 0);
 #else
 	PixmapStartDirtyTracking(ppix, screenpix, 0, 0);
@@ -897,7 +910,7 @@ drmmode_output_dpms(xf86OutputPtr output, int mode)
 
 	for (i = 0; i < koutput->count_props; i++) {
 		props = drmModeGetProperty(drmmode->fd, koutput->props[i]);
-		if (props && (props->flags && DRM_MODE_PROP_ENUM)) {
+		if (props && (props->flags & DRM_MODE_PROP_ENUM)) {
 			if (!strcmp(props->name, "DPMS")) {
 				mode_id = koutput->props[i];
 				drmModeFreeProperty(props);
@@ -1204,7 +1217,7 @@ drmmode_zaphod_match(ScrnInfoPtr pScrn, const char *s, char *output_name)
 }
 
 static unsigned int
-drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int num)
+drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int num, int crtcshift)
 {
 	NVPtr pNv = NVPTR(pScrn);
 	xf86OutputPtr output;
@@ -1286,8 +1299,8 @@ drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int num)
 	output->subpixel_order = subpixel_conv_table[koutput->subpixel];
 	output->driver_private = drmmode_output;
 
-	output->possible_crtcs = kencoder->possible_crtcs;
-	output->possible_clones = kencoder->possible_clones;
+	output->possible_crtcs = kencoder->possible_crtcs >> crtcshift;
+	output->possible_clones = kencoder->possible_clones >> crtcshift;
 
 	output->interlaceAllowed = true;
 	output->doubleScanAllowed = true;
@@ -1381,9 +1394,6 @@ drmmode_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 				       crtc->rotation, crtc->x, crtc->y);
 	}
 
-	if (pNv->AccelMethod == GLAMOR)
-		nouveau_glamor_create_screen_resources(scrn->pScreen);
-
 	if (old_fb_id)
 		drmModeRmFB(drmmode->fd, old_fb_id);
 	nouveau_bo_ref(NULL, &old_bo);
@@ -1411,6 +1421,7 @@ Bool drmmode_pre_init(ScrnInfoPtr pScrn, int fd, int cpp)
 	NVEntPtr pNVEnt = NVEntPriv(pScrn);
 	int i;
 	unsigned int crtcs_needed = 0;
+	int crtcshift;
 
 	drmmode = xnfalloc(sizeof *drmmode);
 	drmmode->fd = fd;
@@ -1434,8 +1445,9 @@ Bool drmmode_pre_init(ScrnInfoPtr pScrn, int fd, int cpp)
 	}
 
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO, "Initializing outputs ...\n");
+	crtcshift = ffs(pNVEnt->assigned_crtcs ^ 0xffffffff) - 1;
 	for (i = 0; i < drmmode->mode_res->count_connectors; i++)
-		crtcs_needed += drmmode_output_init(pScrn, drmmode, i);
+		crtcs_needed += drmmode_output_init(pScrn, drmmode, i, crtcshift);
 
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO,
 		   "%d crtcs needed for screen.\n", crtcs_needed);
@@ -1525,6 +1537,15 @@ drmmode_handle_uevents(ScrnInfoPtr scrn)
 }
 #endif
 
+#if HAVE_NOTIFY_FD
+static void
+drmmode_udev_notify(int fd, int notify, void *data)
+{
+	ScrnInfoPtr scrn = data;
+	drmmode_handle_uevents(scrn);
+}
+#endif
+
 static void
 drmmode_uevent_init(ScrnInfoPtr scrn)
 {
@@ -1551,7 +1572,11 @@ drmmode_uevent_init(ScrnInfoPtr scrn)
 		return;
 	}
 
+#if HAVE_NOTIFY_FD
+	SetNotifyFd(udev_monitor_get_fd(mon), drmmode_udev_notify, X_NOTIFY_READ, scrn);
+#else
 	AddGeneralSocket(udev_monitor_get_fd(mon));
+#endif
 	drmmode->uevent_monitor = mon;
 #endif
 }
@@ -1565,12 +1590,26 @@ drmmode_uevent_fini(ScrnInfoPtr scrn)
 	if (drmmode->uevent_monitor) {
 		struct udev *u = udev_monitor_get_udev(drmmode->uevent_monitor);
 
+#if HAVE_NOTIFY_FD
+		RemoveNotifyFd(udev_monitor_get_fd(drmmode->uevent_monitor));
+#else
 		RemoveGeneralSocket(udev_monitor_get_fd(drmmode->uevent_monitor));
+#endif
 		udev_monitor_unref(drmmode->uevent_monitor);
 		udev_unref(u);
 	}
 #endif
 }
+
+#if HAVE_NOTIFY_FD
+static void
+drmmode_notify_fd(int fd, int notify, void *data)
+{
+	ScrnInfoPtr scrn = data;
+	drmmode_ptr drmmode = drmmode_from_scrn(scrn);
+	drmHandleEvent(drmmode->fd, &drmmode->event_context);
+}
+#else
 
 static void
 drmmode_wakeup_handler(pointer data, int err, pointer p)
@@ -1590,6 +1629,7 @@ drmmode_wakeup_handler(pointer data, int err, pointer p)
 		drmmode_handle_uevents(scrn);
 #endif
 }
+#endif
 
 void
 drmmode_screen_init(ScreenPtr pScreen)
@@ -1607,9 +1647,13 @@ drmmode_screen_init(ScreenPtr pScreen)
 	/* Register wakeup handler only once per servergen, so ZaphodHeads work */
 	if (pNVEnt->fd_wakeup_registered != serverGeneration) {
 		/* Register a wakeup handler to get informed on DRM events */
+#if HAVE_NOTIFY_FD
+		SetNotifyFd(drmmode->fd, drmmode_notify_fd, X_NOTIFY_READ, scrn);
+#else
 		AddGeneralSocket(drmmode->fd);
 		RegisterBlockAndWakeupHandlers((BlockHandlerProcPtr)NoopDDA,
 		                               drmmode_wakeup_handler, scrn);
+#endif
 		pNVEnt->fd_wakeup_registered = serverGeneration;
 		pNVEnt->fd_wakeup_ref = 1;
 	}
@@ -1628,10 +1672,14 @@ drmmode_screen_fini(ScreenPtr pScreen)
 	if (pNVEnt->fd_wakeup_registered == serverGeneration &&
 		!--pNVEnt->fd_wakeup_ref) {
 
+#if HAVE_NOTIFY_FD
+		RemoveNotifyFd(drmmode->fd);
+#else
 		/* Unregister wakeup handler */
 		RemoveBlockAndWakeupHandlers((BlockHandlerProcPtr)NoopDDA,
 		                             drmmode_wakeup_handler, scrn);
 		RemoveGeneralSocket(drmmode->fd);
+#endif
 	}
 
 	/* Tear down udev event handler */

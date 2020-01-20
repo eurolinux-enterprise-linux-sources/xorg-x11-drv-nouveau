@@ -1,0 +1,33 @@
+From 69aecdd305defdd014bc92b82acc6000988511cf Mon Sep 17 00:00:00 2001
+From: Adam Jackson <ajax@redhat.com>
+Date: Tue, 13 Jun 2017 09:23:42 -0400
+Subject: [PATCH] modesetting: Validate the atom for enum properties
+
+The client could have said anything here, and if what they said doesn't
+actually name an atom NameForAtom() will return NULL, and strcmp() will
+be unhappy about that.
+
+[copied from xserver d4995a3936ae283b9080fdaa0905daa669ebacfc]
+
+Signed-off-by: Adam Jackson <ajax@redhat.com>
+---
+ src/drmmode_display.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/drmmode_display.c b/src/drmmode_display.c
+index 2b71c9c..04a0b57 100644
+--- a/src/drmmode_display.c
++++ b/src/drmmode_display.c
+@@ -1081,7 +1081,8 @@ drmmode_output_set_property(xf86OutputPtr output, Atom property,
+ 			if (value->type != XA_ATOM || value->format != 32 || value->size != 1)
+ 				return FALSE;
+ 			memcpy(&atom, value->data, 4);
+-			name = NameForAtom(atom);
++			if (!(name = NameForAtom(atom)))
++				return FALSE;
+ 
+ 			/* search for matching name string, then set its value down */
+ 			for (j = 0; j < p->mode_prop->count_enums; j++) {
+-- 
+2.13.0
+
