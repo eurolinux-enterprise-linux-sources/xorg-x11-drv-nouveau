@@ -7,8 +7,8 @@ Summary:   Xorg X11 nouveau video driver for NVIDIA graphics chipsets
 Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
-Version:   1.0.10
-Release:   5%{?dist}
+Version:   1.0.11
+Release:   2%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -20,6 +20,8 @@ Source0: xf86-video-nouveau-%{gitdate}.tar.xz
 Source0: http://xorg.freedesktop.org/archive/individual/driver/xf86-video-nouveau-%{version}.tar.bz2
 %endif
 Source1: make-git-snapshot.sh
+
+Patch0: nouveau-1.0.11-no-glamor.patch
 
 ExcludeArch: s390 s390x
 
@@ -53,6 +55,7 @@ X.Org X11 nouveau video driver.
 
 %prep
 %setup -q -n xf86-video-nouveau-%{dirsuffix}
+%patch0 -p1
 
 %build
 autoreconf -v --install
@@ -76,6 +79,12 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Thu Oct 1 2015 Ben Skeggs <bskeggs@redhat.com> 1.0.11-2
+- nouveau-1.0.11-no-glamor.patch: use modesetting driver instead
+
+* Wed May 6 2015 Ben Skeggs <bskeggs@redhat.com> 1.0.11-1
+- upstream 1.0.11 (rhbz#1194880)
+
 * Wed Jan 15 2014 Adam Jackson <ajax@redhat.com> - 1:1.0.10-5
 - 1.15 ABI rebuild
 

@@ -1,3 +1,575 @@
+commit 3cd4c8494c296c7583dfa7f0823a272c9e932e03
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Thu Aug 28 03:57:48 2014 +0200
+
+    Bump version to 1.0.11 for release.
+    
+    Highlights:
+    
+    - Support for server managed fd's.
+    - Glamor support.
+    - Maxwell support.
+    - DRI3 and initial Present support.
+    - vsync'ed kms pageflip performance fixes when running on Linux 3.13+
+    - Multi-display vsync, vblank, swap scheduling, timestamping fixes.
+    - Multi x-screen support fixes.
+    - ZaphodHead support on for multiple outputs per x-screen.
+    - EXA nv-10 fixes.
+    - Enable sync of swaps to vblank by default (Option GLXVblank "on").
+    - Disable pseudo-triplebuffering by default (Option SwapLimit "1").
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 6d49f3f7aaaec872b6f9841f744a0bf09cc98492
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Thu Aug 28 03:49:55 2014 +0200
+
+    dri2: Set default SwapLimit to 1 for double-buffering.
+    
+    This used to be 2 for pseudo-triplebuffering on XOrg 1.12+.
+    
+    However, it caused problems like unthrottled swapping
+    at up to twice the video refresh rate for redirected
+    windows under desktop composition, which can't be easily
+    fixed under dri2.
+    
+    Default to double-buffering. Users can override this, but
+    dri3 provides better solutions for this.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 10729a442be3cf018c5806c95ec4218977917ef3
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Mon Aug 18 09:53:27 2014 +0200
+
+    xv/dri2/dri3: Switch to optimized crtc selection for drawables.
+    
+    Make crtc selection consistent with ati and intel ddx.
+    
+    Pick the crtc to use for vblank events, swap scheduling and
+    kms-pageflip completion events as the one with maximum pixel area
+    intersection between its viewport and the drawable. If multiple
+    crtc's viewports display the same amount of area of a drawable,
+    select the crtc whose output is the designated "primary output"
+    for the x-screen. The latter allows, e.g., in a clone display
+    setup, to select the important output on which tearing should be
+    minimized. The former makes sure to minimize or avoid tearing on
+    the display which shows the largest part of the drawable.
+    
+    This method is transplanted from the ati ddx.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit be96a5a62df5e1f286690311a6bc4df4f2a99e57
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Sun Aug 17 02:30:36 2014 +0200
+
+    Add file "compile" to .gitignore
+    
+    Some auto-generated file by new make systems to deal with some
+    old compilers.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 16c885ce9c7bebcfa1252a5d500956dd5f551043
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Tue Aug 12 11:08:24 2014 +0200
+
+    Fix event handling on multi-x-screen configs.
+    
+    Only register the wakeup handler and event socket
+    once per card fd and server generation, as the fd
+    and device file is shared between all x-screens for
+    a given card during a given server generation.
+    
+    Without this fix, vblank and kms-pageflip completion
+    event processing don't work properly, as the server
+    doesn't kick the wakeup handler for gpu events, and
+    therefore the desktop will freeze, unless the user
+    manually kicks the wakeup handler by moving the mouse
+    or hitting the keyboard.
+    
+    Add proper reference counting and checks to make it so.
+    This fix is derived from a similar and proven fix in
+    the ati ddx for the same problem.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 7eab6806927ea8938b9bd143d1702e87fde2f2cc
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Wed Aug 13 06:48:10 2014 +0200
+
+    Make new ZaphodHeads work across server regenerations.
+    
+    Reset the mask of already assigned crtc's at start
+    of each new server generation.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 6ad053788e804f3a8bd36ee3653ec95e7df62623
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Wed Aug 6 07:37:32 2014 +0200
+
+    dri2 and xv: Fix NVxxSyncToVBlank() for multi-x-screen's.
+    
+    Use helper function drmmode_head() to choose proper hw-crtc
+    to sync to. Fixes xv blits, and dri2 Copy-Swaps.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 17de663a71bcad6f69414eb6bc6bf9b76a6bf5f4
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Mon Aug 11 09:48:42 2014 +1000
+
+    fix glamor header check
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 64ca88570b71289a019a2d130b1a30dc474ef52d
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Mon Aug 11 08:59:30 2014 +1000
+
+    present: use drmmode_head() where it's appropriate
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 6e71bdf5a9da15c60694fa8543243e37a32c5faf
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Mon Jun 23 11:25:41 2014 +0200
+
+    Allow/Fix use of multiple ZaphodHead outputs per x-screen.
+    
+    Defining multiple ZaphodHead outputs per x-screen in a
+    multiple x-screen's per gpu configuration caused all
+    outputs except one per x-screen to go dark, because
+    there was a fixed mapping x-screen number -> crtc number,
+    limiting the number of crtc's per x-screen to one.
+    
+    On a ZaphodHead's setup, be more clever and assign
+    as many crtc's to a given x-screen as there are
+    ZaphodHeads defined for that screen, assuming
+    there are enough unused crtc's available.
+    
+    Tested on a triple display setup with different combos
+    of one, two or three ZaphodHeads per one, two or three
+    x-screens.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit fcf91a275e96f14e49a93dc3f8dd6798cf7d98f3
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Mon Jun 23 11:13:57 2014 +0200
+
+    dri2: Fix drmWaitVblank on multi-x-screen configs.
+    
+    Old mapping of xf86Crtc -> display head index was
+    too simple and only worked on a single x-screen config.
+    
+    Introduce a new helper function drmmode_hw_head_index()
+    which returns proper mapping also for multi x-screens per
+    gpu and ZaphodHeads setups and other non-standard multi-
+    display configurations.
+    
+    Tested on triple-head setup with various ZaphodHead and
+    server layout combos.
+    
+    This helper will be also needed for dri3/present code.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+
+commit 29572e44c24613be9dec0c98ff2731e46ce6203b
+Author: Ilia Mirkin <imirkin@alum.mit.edu>
+Date:   Sun Aug 10 02:25:15 2014 -0400
+
+    exa/nv10: src ops should use the SF macro
+    
+    Doesn't actually end up mattering.
+    
+    Signed-off-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 35e17905e1c54558059f6b72b8594a3377f1a57c
+Author: Ilia Mirkin <imirkin@alum.mit.edu>
+Date:   Sun Aug 10 02:25:14 2014 -0400
+
+    exa/nv10: fix blend function setup to check the correct mask
+    
+    Signed-off-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit dfac18c67a17782a0263daf8cb4ee487374abd2c
+Author: Ilia Mirkin <imirkin@alum.mit.edu>
+Date:   Sun Aug 10 02:25:13 2014 -0400
+
+    exa/nv10: use color 0 when the pict format has no RGB component
+    
+    Signed-off-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit ff7010e06b6da0fe27143b47b8a4ffd2f12894b7
+Author: Ilia Mirkin <imirkin@alum.mit.edu>
+Date:   Sun Aug 10 02:25:12 2014 -0400
+
+    exa/nv10: use same clip settings as mesa driver
+    
+    The higher 0x800 was getting overwritten by the 0x7ff anyways, so it
+    wasn't doing any good. The mesa driver just uses 0x800 for the low
+    portion and doesn't set the 8 bit in the higher portion, so do the same
+    thing here.
+    
+    Signed-off-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit edd1608c397ebcf487b84948031f7807178e5e4d
+Author: Emil Velikov <emil.l.velikov@gmail.com>
+Date:   Tue Jul 1 22:31:47 2014 +0100
+
+    xorg_list: define the xorg_list* symbols
+    
+    ...when building against pre 1.12 x.
+    The build will fail as earlier versions of X were missing the xorg_
+    prefix of the symbols - struct and util functions.
+    
+    Reported-by: Pali Rohár <pali.rohar@gmail.com>
+    Signed-off-by: Emil Velikov <emil.l.velikov@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit f6c1c755d8230494c8115e2c7899a85663f5c176
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Tue Jul 1 12:56:49 2014 +1000
+
+    fix a harmless typo
+    
+    fdo#80738
+    
+    Reported-by: Paulo Sérgio Travaglia <pstglia@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 096fb1ebc10b14ba1b747832efe378369bcf44e6
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Mon May 26 05:39:50 2014 +0200
+
+    dri2: Add support for handling more than 2 crtc's
+    
+    Need to use the DRM_VBLANK_HIGH_CRTC bits to allow
+    selecting crtc's with id > 1 on latest gpu's with
+    up to four display engines.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 4771ff5c668047a2dc56e4c6131175eed837e757
+Author: Marcin Slusarz <marcin.slusarz@gmail.com>
+Date:   Sun Jun 22 01:32:42 2014 +0200
+
+    present: build only when glamor is enabled
+    
+    nouveau_present_flip_exec references glamor_fd_from_pixmap,
+    which do not exist when glamor is disabled
+    
+    Signed-off-by: Marcin Slusarz <marcin.slusarz@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 41c1c4ee867753422d6486f13bf20b45905a5dd5
+Author: Marcin Slusarz <marcin.slusarz@gmail.com>
+Date:   Sun Jun 22 01:31:46 2014 +0200
+
+    glamor: fix build without glamor.h
+    
+    xorg-server can be built without glamor, which leads to:
+    
+      CC       nouveau_xv.lo
+    In file included from nouveau_xv.c:41:0:
+    nouveau_glamor.h:12:20: fatal error: glamor.h: No such file or directory
+    compilation terminated.
+    
+    Signed-off-by: Marcin Slusarz <marcin.slusarz@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit f0fa8313714c2a5b16e784b257b5ff79da3a443b
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Thu Jun 19 17:11:34 2014 +0200
+
+    dri2: Enable sync of bufferswaps to Vblank by default.
+    
+    Make this consistent with other drivers default behaviour.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 02d7e647ce3a4a5d48c4ee94c94bebcac2d4827d
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Sat Jun 21 01:26:16 2014 +0200
+
+    dri2: Fix kms pageflip completion timestamping.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 4d92001ebe6bec8c5eaab8156421e62a7e4dedc8
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Fri Mar 14 18:27:53 2014 +0100
+
+    Add kernel async_flip cap detection. Part II of double-sync fix.
+    
+    Query if kernel supports the async_flip cap, thereby needs the
+    new sync behavior. Linux 3.13+ nouveau-kms have this cap and
+    need this fix.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 54dfbb2fed393b65d846e6ed9672acb47e0f19de
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Fri Mar 14 18:23:04 2014 +0100
+
+    dri2: Fix double-sync of pageflips on Linux 3.13+ - Part I
+    
+    Linux 3.13 and later sync kms pageflips to vblank in the kms
+    driver, so we must not emit a sync to vblank pushbuf in the ddx
+    on such kernels, or maximum framerate will be cut into half!
+    
+    A sync-to-vblank-pushbuf is emitted for copyswaps as in the past,
+    also for older kernels which don't support async_pageflip's and
+    don't sync by themselves.
+    
+    This adds the implementation, but not the detection logic for
+    async_pageflip support in the kernel.
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 303402e00d55b5296311738184cd61f4aadab74d
+Author: Mario Kleiner <mario.kleiner.de@gmail.com>
+Date:   Sat Jun 21 00:09:39 2014 +0200
+
+    Fix nouveau_copy_init()
+    
+    Signed-off-by: Mario Kleiner <mario.kleiner.de@gmail.com>
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 65a70c4edd1f0df808a3a4dea6e8c9846cc7c920
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 16:57:18 2014 +1000
+
+    another build fix...
+
+commit 882ebb4000803f6025e1bb3213a31b19f6d1a2c6
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Mon Nov 18 14:42:02 2013 +1000
+
+    present: initial support
+    
+    Until glamor grows its own implementation.
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 0d94f32fce2759c4b0f4d22b99f3ced09c2aa5a0
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 09:47:39 2014 +1000
+
+    kms: implement a more generic event mechanism
+    
+    Present wants to use this too.
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 97feb3b2104287eb385ffba8329f304e2808d808
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 09:29:08 2014 +1000
+
+    dri2: move page flip handling out of drmmode
+    
+    Nothing to see here... This is to (hopefully) avoid busting DRI2 while
+    implementing Present support.
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 60b876eab3708f1c277027addb5514974452644c
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 09:20:37 2014 +1000
+
+    dri2: move away from directly touching drmmode on page flips
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 36dda1341008dd87a6b5459f0616776097d11d9f
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 09:04:30 2014 +1000
+
+    dri2: shuffle some functions around
+    
+    Nothing to see here...
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 8bdec8ebd68ba5eaa696d8a666e18774bff3b2ad
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 12:37:33 2014 +1000
+
+    glamor: fix randr resize
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 3c45b590a31157abca140096b141aa83fecb671f
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Fri Jun 20 08:28:30 2014 +1000
+
+    sync: fix build against DRI3-less server
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 88ae58d786b0c41148e692dbfe8e2646e7533d9e
+Author: Ilia Mirkin <imirkin@alum.mit.edu>
+Date:   Thu Jun 19 02:37:45 2014 -0400
+
+    update man page with new chips, AccelMethod option
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 5cb36ba57493bf7edf560bf370c87eff79f1d1a6
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    default to glamor on maxwell
+    
+    We have no RENDER/Xv acceleration in EXA for Maxwell.
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 81148bb1dbc7007c021c59411d56cb31cfc74ef2
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    glamor: provide dri3 support when enabled
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 86024ceef015ffe31a204cc5bc6c326a19363ff1
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    glamor: initial support (no dri)
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit fd0ce8839f307693d86c7602dd926ce79e6b777d
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    add support for maxwell, minus Xv/renderaccel
+    
+    More extensive acceleration will be via glamor, at least to begin with.  It
+    seems to make sense to jump on the bandwagon now, and deal with any issues
+    that arise before it it becomes the standard for XWayland.
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 8ad0465e15bfc502abc259e886d6dcb448e0141a
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    50/c0/e0 -> tesla/fermi/kepler
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 4b138ab18f58c6d459e21dc319615f536c8e69c8
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    merge nv_dma.c into nv_accel_common.c
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 5c44e6b86195c22e092db5dae06e70208e8b66a0
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    pull copy engine handling into one place, a place that isn't also exa
+    
+    As a side-effect, we now allow Kepler to use async copies too.
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit c375bacbdaeabd0288855c13b4717d0694be9e56
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    exa: move module load into nouveau_exa_init
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit b24cae0bf5db6ece21439d4c6ff3668aed4c78d6
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    dri2: move "is supported" checks out of nv_driver.c
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 07c26a0670dd2558acf8e1159f2f68989a7f753d
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    replace NoAccel with AccelMethod in preparation for glamor support
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit e7cf48d9529160f7add2fef72d2e42be9370594a
+Author: Ben Skeggs <bskeggs@redhat.com>
+Date:   Thu Jun 19 14:54:20 2014 +1000
+
+    silence a warning
+    
+    Signed-off-by: Ben Skeggs <bskeggs@redhat.com>
+
+commit 4a18dd74c0cc6e75937eb78347e8ea6c81d1373a
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Mon May 26 17:30:24 2014 +1000
+
+    autogen: add support for gnome autobuilder
+    
+    Signed-off-by: Dave Airlie <airlied@redhat.com>
+
+commit 8604a741baa5360164a882bd9f3c8474840744db
+Author: Hans de Goede <hdegoede@redhat.com>
+Date:   Fri Apr 11 14:20:43 2014 +0200
+
+    Fix building on older servers without xf86platformBus.h
+    
+    Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+
+commit 0c13843e300d1a9db2bfed18dc1b5df38c5adfdf
+Author: Hans de Goede <hdegoede@redhat.com>
+Date:   Mon Mar 17 17:37:31 2014 +0100
+
+    Add support for server managed fds
+    
+    v2 (Martin Peres):
+    	- Do not define "NVEntPtr pNVEnt" if not needed to avoid some warnings
+    
+    Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+    Signed-off-by: Martin Peres <martin.peres@free.fr>
+
+commit 47f08aa6d713da4e6ae9c35ce691e790ffaed09d
+Author: Hans de Goede <hdegoede@redhat.com>
+Date:   Mon Mar 17 17:37:30 2014 +0100
+
+    Add a NVOpenNouveauDevice helper function
+    
+    This is a preparation patch for adding support for server managed fds
+    
+    Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+    Signed-off-by: Martin Peres <martin.peres@free.fr>
+
 commit 480f0998ffed6d9a5c6656dba75182f00fd88a1b
 Author: Ben Skeggs <bskeggs@redhat.com>
 Date:   Thu Nov 7 14:56:48 2013 +1000
