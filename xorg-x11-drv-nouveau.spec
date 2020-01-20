@@ -8,7 +8,7 @@ Name:      xorg-x11-drv-nouveau
 # need to set an epoch to get version number in sync with upstream
 Epoch:     1
 Version:   1.0.11
-Release:   2%{?dist}
+Release:   4%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -22,6 +22,8 @@ Source0: http://xorg.freedesktop.org/archive/individual/driver/xf86-video-nouvea
 Source1: make-git-snapshot.sh
 
 Patch0: nouveau-1.0.11-no-glamor.patch
+Patch1: nouveau-1.0.11-coverity.patch
+Patch2: nouveau-1.0.11-cleanup-reverse-prime-fb.patch
 
 ExcludeArch: s390 s390x
 
@@ -30,7 +32,7 @@ Obsoletes: xorg-x11-drv-nv < 2.1.20-3
 %endif
 
 BuildRequires: libtool automake autoconf
-BuildRequires: xorg-x11-server-devel >= xorg-x11-server-1.14.2-8
+BuildRequires: xorg-x11-server-devel >= 1.14.2-8
 BuildRequires: libdrm-devel >= 2.4.24-0.1.20110106
 BuildRequires: mesa-libGL-devel
 %if 0%{?fedora} > 17 || 0%{?rhel} > 6
@@ -56,6 +58,8 @@ X.Org X11 nouveau video driver.
 %prep
 %setup -q -n xf86-video-nouveau-%{dirsuffix}
 %patch0 -p1
+%patch1 -p1
+%patch2 -p1
 
 %build
 autoreconf -v --install
@@ -79,6 +83,14 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man4/nouveau.4*
 
 %changelog
+* Thu Aug 4 2016 Hans de Goede <hdegoede@redhat.com> - 1.0.11-4
+- nouveau-1.0.11-cleanup-reverse-prime-fb: fix gpu not suspending after
+  using an external output in a switchable graphics setup
+- Resolves: rhbz#1349821
+
+* Thu Jun 9 2016 Ben Skeggs <bskeggs@redhat.com> 1.0.11-3
+- nouveau-1.0.11-coverity.patch: fix use of out-of-scope data
+
 * Thu Oct 1 2015 Ben Skeggs <bskeggs@redhat.com> 1.0.11-2
 - nouveau-1.0.11-no-glamor.patch: use modesetting driver instead
 
